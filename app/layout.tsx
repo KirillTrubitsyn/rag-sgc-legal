@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'RAG SGC Legal',
-  description: 'RAG система для работы с юридическими документами',
+  description: 'Юридический ассистент СГК для работы с нормативами и стандартами',
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body>
+      <body className="antialiased">
         {children}
       </body>
     </html>
