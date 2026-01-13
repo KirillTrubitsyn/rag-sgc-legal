@@ -18,9 +18,9 @@ export default function ChatInterface() {
             <Scale className="w-6 h-6 text-sgc-orange-500" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-white">RAG SGC Legal</h1>
+            <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
             <p className="text-sm text-white/70">
-              Поиск по нормативным документам СГК
+              Регламенты и стандарты работы юристов
             </p>
           </div>
         </div>
@@ -36,19 +36,19 @@ export default function ChatInterface() {
                 <FileText className="w-10 h-10 text-sgc-orange-500" />
               </div>
               <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-3">
-                Добро пожаловать
+                Юридическая служба СГК
               </h2>
               <p className="text-sgc-blue-500/60 max-w-md">
-                Задайте вопрос о нормативных документах и стандартах СГК.
-                Система найдёт релевантную информацию в базе знаний.
+                Поиск по регламентам и стандартам работы юристов
+                Сибирской генерирующей компании.
               </p>
 
               {/* Quick suggestions */}
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 {[
-                  'Требования к безопасности',
-                  'Стандарты качества',
-                  'Правила эксплуатации',
+                  'Порядок согласования договоров',
+                  'Претензионная работа',
+                  'Судебное представительство',
                 ].map((suggestion) => (
                   <button
                     key={suggestion}
@@ -173,7 +173,7 @@ export default function ChatInterface() {
               type="text"
               value={input}
               onChange={handleInputChange}
-              placeholder="Задайте вопрос о документах..."
+              placeholder="Задайте вопрос о регламентах и стандартах..."
               disabled={isLoading}
               className={cn(
                 'flex-1 rounded-xl border border-slate-200 px-4 py-3',
