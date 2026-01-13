@@ -25,16 +25,25 @@ COLLECTION_ID=your_collection_id_here
 ```
 
 **Где взять:**
-- `XAI_API_KEY` — получи на [console.x.ai](https://console.x.ai)
-- `COLLECTION_ID` — ID твоей коллекции документов в xAI Collections
+- **XAI_API_KEY**: создай API ключ "RAG SGC" на https://console.x.ai
+- **COLLECTION_ID**: скопируй ID коллекции "Standards and Regulations" на https://console.x.ai/collections
 
-### 3. Запуск приложения
+### 3. Запуск dev сервера
 
 ```bash
 npm run dev
 ```
 
-Открой [http://localhost:3000](http://localhost:3000) в браузере.
+Открой http://localhost:3000
+
+## Deploy на Vercel
+
+1. Push код в GitHub
+2. Импортируй репозиторий на https://vercel.com
+3. Добавь Environment Variables: `XAI_API_KEY`, `COLLECTION_ID`
+4. Deploy
+
+Каждый последующий `git push` автоматически обновит production.
 
 ## Структура проекта
 
@@ -74,6 +83,13 @@ rag-sgc-legal/
 - Empty state и loading состояния
 - Карточки с результатами поиска
 
+## Примеры запросов
+
+- "Найди информацию о порядке согласования договоров"
+- "Какие штрафные санкции предусмотрены в стандартах СГК?"
+- "Покажи требования к оформлению протоколов разногласий"
+- "Есть ли информация о сроках хранения документов?"
+
 ## API Endpoints
 
 ### POST /api/chat
@@ -99,20 +115,11 @@ Streaming endpoint для общения с ассистентом.
 
 ## Разработка
 
-### Команды
-
 ```bash
-# Разработка
-npm run dev
-
-# Сборка
-npm run build
-
-# Запуск production
-npm start
-
-# Линтинг
-npm run lint
+npm run dev      # Development server
+npm run build    # Production build
+npm run start    # Production server
+npm run lint     # ESLint
 ```
 
 ### Переменные окружения
