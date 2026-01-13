@@ -1,7 +1,7 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, Loader2, FileText } from 'lucide-react';
+import { Send, FileText, Scale } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function ChatInterface() {
@@ -10,26 +10,54 @@ export default function ChatInterface() {
   });
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6">
-        <h1 className="text-xl font-semibold text-gray-900">RAG SGC Legal</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          Поиск по нормативным документам и стандартам СГК с использованием Grok Collections
-        </p>
+    <div className="flex flex-col h-screen bg-[#f8fafc]">
+      {/* Header with SGC Gradient */}
+      <header className="sgc-header px-4 py-5 sm:px-6 shadow-lg">
+        <div className="max-w-4xl mx-auto flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+            <Scale className="w-6 h-6 text-sgc-orange-500" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-white">RAG SGC Legal</h1>
+            <p className="text-sm text-white/70">
+              Поиск по нормативным документам СГК
+            </p>
+          </div>
+        </div>
       </header>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 bg-gray-50">
+      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="max-w-4xl mx-auto space-y-4">
           {messages.length === 0 ? (
             // Empty State
-            <div className="flex flex-col items-center justify-center h-full text-center py-12">
-              <FileText className="w-12 h-12 text-gray-300 mb-4" />
-              <h2 className="text-xl font-medium text-gray-900 mb-2">Начните диалог</h2>
-              <p className="text-gray-600">
-                Задайте вопрос о документах в вашей коллекции
+            <div className="flex flex-col items-center justify-center h-full text-center py-16">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-sgc-orange-500/10 to-sgc-orange-500/5 flex items-center justify-center mb-6">
+                <FileText className="w-10 h-10 text-sgc-orange-500" />
+              </div>
+              <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-3">
+                Добро пожаловать
+              </h2>
+              <p className="text-sgc-blue-500/60 max-w-md">
+                Задайте вопрос о нормативных документах и стандартах СГК.
+                Система найдёт релевантную информацию в базе знаний.
               </p>
+
+              {/* Quick suggestions */}
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                {[
+                  'Требования к безопасности',
+                  'Стандарты качества',
+                  'Правила эксплуатации',
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    className="px-4 py-2 rounded-full border border-sgc-orange-500/30 text-sgc-orange-500 text-sm hover:bg-sgc-orange-500/5 transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             // Messages
@@ -43,14 +71,14 @@ export default function ChatInterface() {
               >
                 <div
                   className={cn(
-                    'max-w-[80%] sm:max-w-[70%] px-4 py-3 rounded-lg',
+                    'max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl',
                     message.role === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white border border-gray-200 text-gray-900'
+                      ? 'sgc-user-bubble'
+                      : 'sgc-assistant-bubble text-sgc-blue-500'
                   )}
                 >
                   {/* Message Content */}
-                  <div className="whitespace-pre-wrap break-words">
+                  <div className="whitespace-pre-wrap break-words leading-relaxed">
                     {message.content}
                   </div>
 
@@ -73,32 +101,39 @@ export default function ChatInterface() {
 
                           if (result.results && result.results.length > 0) {
                             return (
-                              <div key={toolInvocation.toolCallId} className="mt-3">
-                                <div className="text-sm font-medium mb-2 text-gray-700">
-                                  📚 Найденные документы:
+                              <div key={toolInvocation.toolCallId} className="mt-4">
+                                <div className="flex items-center gap-2 text-sm font-medium mb-3 text-sgc-blue-500">
+                                  <FileText className="w-4 h-4 text-sgc-orange-500" />
+                                  Найденные документы:
                                 </div>
                                 <div className="space-y-2">
                                   {result.results.map((doc, idx) => (
                                     <div
                                       key={idx}
-                                      className="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm"
+                                      className="sgc-doc-card rounded-lg p-3 text-sm"
                                     >
                                       <div className="flex items-start justify-between gap-2 mb-1">
-                                        <span className="font-medium text-gray-900">
+                                        <span className="font-medium text-sgc-blue-500">
                                           {doc.source}
                                         </span>
                                         {doc.page && (
-                                          <span className="text-xs text-gray-500 whitespace-nowrap">
+                                          <span className="text-xs text-sgc-blue-500/50 whitespace-nowrap bg-white/50 px-2 py-0.5 rounded">
                                             стр. {doc.page}
                                           </span>
                                         )}
                                       </div>
                                       {doc.score !== undefined && (
-                                        <div className="text-xs text-gray-500 mb-2">
-                                          Релевантность: {(doc.score * 100).toFixed(1)}%
+                                        <div className="text-xs text-sgc-orange-500 mb-2 flex items-center gap-1">
+                                          <div className="w-16 h-1.5 bg-white/50 rounded-full overflow-hidden">
+                                            <div
+                                              className="h-full bg-sgc-orange-500 rounded-full"
+                                              style={{ width: `${doc.score * 100}%` }}
+                                            />
+                                          </div>
+                                          <span>{(doc.score * 100).toFixed(0)}%</span>
                                         </div>
                                       )}
-                                      <div className="text-gray-700 line-clamp-3">
+                                      <div className="text-sgc-blue-500/80 line-clamp-3">
                                         {doc.content}
                                       </div>
                                     </div>
@@ -120,8 +155,10 @@ export default function ChatInterface() {
           {/* Loading State */}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
-                <Loader2 className="w-5 h-5 text-gray-600 animate-spin" />
+              <div className="sgc-assistant-bubble rounded-2xl px-5 py-4 flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
+                <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
+                <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
               </div>
             </div>
           )}
@@ -129,7 +166,7 @@ export default function ChatInterface() {
       </div>
 
       {/* Input Form */}
-      <div className="bg-white border-t border-gray-200 px-4 py-4 sm:px-6">
+      <div className="bg-white border-t border-slate-200 px-4 py-4 sm:px-6 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
         <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
           <div className="flex gap-3">
             <input
@@ -139,10 +176,11 @@ export default function ChatInterface() {
               placeholder="Задайте вопрос о документах..."
               disabled={isLoading}
               className={cn(
-                'flex-1 rounded-lg border border-gray-300 px-4 py-2.5',
-                'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'disabled:bg-gray-100 disabled:cursor-not-allowed',
-                'text-gray-900 placeholder-gray-500'
+                'flex-1 rounded-xl border border-slate-200 px-4 py-3',
+                'focus:outline-none sgc-input',
+                'disabled:bg-slate-50 disabled:cursor-not-allowed',
+                'text-sgc-blue-500 placeholder-slate-400',
+                'transition-all duration-200'
               )}
             />
             <button
@@ -150,18 +188,13 @@ export default function ChatInterface() {
               disabled={isLoading || !input.trim()}
               className={cn(
                 'inline-flex items-center justify-center',
-                'rounded-lg bg-blue-600 px-4 py-2.5',
+                'rounded-xl px-5 py-3',
                 'text-white font-medium',
-                'hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
-                'disabled:bg-gray-300 disabled:cursor-not-allowed',
-                'transition-colors'
+                'sgc-btn-primary',
+                'focus:outline-none focus:ring-2 focus:ring-sgc-orange-500 focus:ring-offset-2'
               )}
             >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
+              <Send className="w-5 h-5" />
             </button>
           </div>
         </form>
