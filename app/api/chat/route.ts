@@ -43,25 +43,33 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
     }
 
     const data = await response.json();
-    console.log('Search response:', JSON.stringify(data).substring(0, 1000));
+    console.log('Search response keys:', Object.keys(data));
+    console.log('Search response preview:', JSON.stringify(data).substring(0, 1500));
 
-    // Обрабатываем различные форматы ответа
-    const results = data.results || data.documents || data.matches || data.chunks || data.data || [];
+    // xAI возвращает результаты в поле "matches"
+    const results = data.matches || data.results || [];
     console.log('Search returned', results.length, 'results');
 
     if (results.length === 0) {
+      console.log('No results found in search response');
       return '';
+    }
+
+    // Логируем первый результат для отладки
+    if (results[0]) {
+      console.log('First result keys:', Object.keys(results[0]));
+      console.log('First result fields:', JSON.stringify(results[0].fields || {}).substring(0, 500));
     }
 
     // Форматируем результаты поиска
     const formattedResults = results.map((r: any, i: number) => {
-      // Получаем контент из разных возможных полей
+      // Контент в chunk_content
       const content = r.chunk_content || r.content || r.text || '';
-      // Получаем название файла из разных возможных полей
-      const fileName = r.fields?.file_name || r.fields?.name || r.file_name || r.name || 'Документ';
-      const score = r.score || r.relevance_score || '';
+      // Название файла в fields
+      const fileName = r.fields?.file_name || r.fields?.name || r.fields?.title || r.name || 'Документ';
+      const score = r.score ? r.score.toFixed(3) : '';
 
-      return `[${i + 1}] ${fileName} (score: ${score}):\n${content}`;
+      return `[${i + 1}] ${fileName} (релевантность: ${score}):\n${content}`;
     }).join('\n\n---\n\n');
 
     return formattedResults;
