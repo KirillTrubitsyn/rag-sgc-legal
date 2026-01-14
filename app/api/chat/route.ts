@@ -1,3 +1,5 @@
+import { streamText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createGrokClient, legalSystemPrompt, collectionsSearchTool } from '@/lib/grok-client';
 
 export const runtime = 'edge';
@@ -30,52 +32,40 @@ export async function POST(req: Request) {
       );
     }
 
-    // Подготовка сообщений для API
-    const apiMessages = messages.map((m: any) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    console.log('Calling xAI API directly with grok-4-1-fast-reasoning...');
-
-    // Прямой вызов xAI Chat API (без AI SDK)
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'grok-4-1-fast-reasoning',
-        messages: [
-          { role: 'system', content: legalSystemPrompt },
-          ...apiMessages,
-        ],
-        stream: true,
-      }),
+    // Создаем xAI клиент В МОМЕНТ ЗАПРОСА
+    const xai = createOpenAI({
+      apiKey: apiKey,
+      baseURL: 'https://api.x.ai/v1',
     });
 
-    console.log('xAI API response status:', response.status);
+    const grokClient = createGrokClient({
+      apiKey: apiKey,
+      collectionId: collectionId,
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('xAI API error:', errorText);
-      return new Response(
-        JSON.stringify({ error: 'xAI API error', details: errorText }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    console.log('Creating streamText with model: grok-4-1-fast-reasoning');
 
-    console.log('Streaming response from xAI...');
-
-    // Возвращаем stream напрямую
-    return new Response(response.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+    // Streaming с AI SDK
+    const result = streamText({
+      model: xai('grok-4-1-fast-reasoning'),
+      system: legalSystemPrompt,
+      messages,
+      maxSteps: 5,
+      tools: {
+        collections_search: {
+          description: collectionsSearchTool.description,
+          parameters: collectionsSearchTool.parameters,
+          execute: async ({ query, top_k = 5 }: { query: string; top_k?: number }) => {
+            console.log('Tool called: collections_search, query:', query);
+            const results = await grokClient.search(query, { topK: top_k });
+            return { results };
+          },
+        },
       },
     });
+
+    console.log('Returning AI SDK stream response');
+    return result.toDataStreamResponse();
 
   } catch (error) {
     console.error('Chat API error:', error);
