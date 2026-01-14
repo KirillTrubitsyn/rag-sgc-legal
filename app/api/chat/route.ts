@@ -5,22 +5,29 @@ export const maxDuration = 60;
 
 // Функция поиска по коллекции
 async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
-  console.log('Searching collection for:', query);
+  console.log('=== Collection Search ===');
+  console.log('Query:', query);
+  console.log('Collection ID:', collectionId);
 
   try {
+    const requestBody = {
+      query,
+      collection_ids: [collectionId],
+      top_k: 10,
+      retrieval_mode: 'hybrid',
+    };
+    console.log('Search request:', JSON.stringify(requestBody));
+
     const response = await fetch('https://api.x.ai/v1/collections/search', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        query,
-        collection_ids: [collectionId],
-        top_k: 10,
-        retrieval_mode: 'hybrid',
-      }),
+      body: JSON.stringify(requestBody),
     });
+
+    console.log('Search response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -29,6 +36,7 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
     }
 
     const data = await response.json();
+    console.log('Search response data:', JSON.stringify(data).substring(0, 1000));
     console.log('Search returned', data.results?.length || 0, 'results');
 
     if (!data.results || data.results.length === 0) {
