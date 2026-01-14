@@ -58,6 +58,7 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     let chunkCount = 0;
+    let buffer = ''; // Буфер для неполных строк между чанками
 
     let rawSampleLogged = false;
 
@@ -71,16 +72,23 @@ export async function POST(req: Request) {
           rawSampleLogged = true;
         }
 
-        const lines = text.split('\n');
+        // Добавляем новый текст к буферу и разбиваем на строки
+        buffer += text;
+        const lines = buffer.split('\n');
+
+        // Последняя строка может быть неполной - сохраняем её в буфер
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
+          const trimmedLine = line.trim();
+
           // Логируем каждую строку для отладки
-          if (line.trim() && chunkCount < 2) {
-            console.log('LINE:', line.substring(0, 200));
+          if (trimmedLine && chunkCount < 2) {
+            console.log('LINE:', trimmedLine.substring(0, 200));
           }
 
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
+          if (trimmedLine.startsWith('data: ')) {
+            const data = trimmedLine.slice(6).trim();
 
             if (data === '[DONE]') {
               console.log('Stream done, total chunks:', chunkCount);
@@ -107,11 +115,32 @@ export async function POST(req: Request) {
               }
             } catch (e) {
               // Невалидный JSON - пропускаем
+              console.log('JSON parse error for line:', trimmedLine.substring(0, 100));
             }
           }
         }
       },
       flush(controller) {
+        // Обрабатываем оставшиеся данные в буфере
+        if (buffer.trim()) {
+          const trimmedLine = buffer.trim();
+          if (trimmedLine.startsWith('data: ')) {
+            const data = trimmedLine.slice(6).trim();
+            if (data !== '[DONE]') {
+              try {
+                const json = JSON.parse(data);
+                const content = json.choices?.[0]?.delta?.content;
+                const reasoningContent = json.choices?.[0]?.delta?.reasoning_content;
+                const textToSend = content || reasoningContent;
+                if (textToSend) {
+                  controller.enqueue(encoder.encode(`0:${JSON.stringify(textToSend)}\n`));
+                }
+              } catch (e) {
+                // Невалидный JSON в конце - пропускаем
+              }
+            }
+          }
+        }
         console.log('Stream flush, sending finish');
         controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
       }
