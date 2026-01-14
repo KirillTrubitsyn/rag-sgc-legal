@@ -1,6 +1,4 @@
-import { streamText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createGrokClient, legalSystemPrompt, collectionsSearchTool } from '@/lib/grok-client';
+import { legalSystemPrompt } from '@/lib/grok-client';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -15,65 +13,87 @@ export async function POST(req: Request) {
     const apiKey = process.env.XAI_API_KEY;
     const collectionId = process.env.COLLECTION_ID;
 
-    console.log('ENV check:', {
-      hasApiKey: !!apiKey,
-      apiKeyLength: apiKey?.length,
-      hasCollectionId: !!collectionId,
-    });
-
     if (!apiKey || !collectionId) {
-      const missing = [];
-      if (!apiKey) missing.push('XAI_API_KEY');
-      if (!collectionId) missing.push('COLLECTION_ID');
-      console.error(`Missing env vars: ${missing.join(', ')}`);
       return new Response(
-        JSON.stringify({ error: `Missing: ${missing.join(', ')}` }),
+        JSON.stringify({ error: 'Missing env vars' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Создаем xAI клиент В МОМЕНТ ЗАПРОСА
-    const xai = createOpenAI({
-      apiKey: apiKey,
-      baseURL: 'https://api.x.ai/v1',
+    const apiMessages = messages.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    console.log('Calling xAI API with grok-4-1-fast-reasoning...');
+
+    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'grok-4-1-fast-reasoning',
+        messages: [
+          { role: 'system', content: legalSystemPrompt },
+          ...apiMessages,
+        ],
+        stream: true,
+      }),
     });
 
-    const grokClient = createGrokClient({
-      apiKey: apiKey,
-      collectionId: collectionId,
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('xAI API error:', errorText);
+      return new Response(
+        JSON.stringify({ error: 'xAI API error', details: errorText }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
-    console.log('Creating streamText with model: grok-4-1-fast-reasoning');
+    // Трансформируем xAI SSE в формат AI SDK
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
 
-    // Streaming с AI SDK
-    const result = streamText({
-      model: xai('grok-4-1-fast-reasoning'),
-      system: legalSystemPrompt,
-      messages,
-      maxSteps: 5,
-      tools: {
-        collections_search: {
-          description: collectionsSearchTool.description,
-          parameters: collectionsSearchTool.parameters,
-          execute: async ({ query, top_k = 5 }: { query: string; top_k?: number }) => {
-            console.log('Tool called: collections_search, query:', query);
-            const results = await grokClient.search(query, { topK: top_k });
-            return { results };
-          },
-        },
+    const transformStream = new TransformStream({
+      transform(chunk, controller) {
+        const text = decoder.decode(chunk);
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              // Отправляем финальное сообщение
+              controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+              return;
+            }
+            try {
+              const json = JSON.parse(data);
+              const content = json.choices?.[0]?.delta?.content;
+              if (content) {
+                // Формат AI SDK: 0:"текст"
+                controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+              }
+            } catch (e) {
+              // Игнорируем невалидный JSON
+            }
+          }
+        }
       },
     });
 
-    console.log('Returning AI SDK stream response');
-    return result.toDataStreamResponse();
+    return new Response(response.body?.pipeThrough(transformStream), {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
+    });
 
   } catch (error) {
     console.error('Chat API error:', error);
     return new Response(
-      JSON.stringify({
-        error: 'Request failed',
-        details: error instanceof Error ? error.message : String(error),
-      }),
+      JSON.stringify({ error: 'Request failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
