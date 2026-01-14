@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       content: m.content,
     }));
 
-    console.log('Calling xAI API directly with grok-2-latest...');
+    console.log('Calling xAI API directly with grok-4-1-fast-reasoning...');
 
     // Прямой вызов xAI Chat API (без AI SDK)
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'grok-2-latest',
+        model: 'grok-4-1-fast-reasoning',
         messages: [
           { role: 'system', content: legalSystemPrompt },
           ...apiMessages,
