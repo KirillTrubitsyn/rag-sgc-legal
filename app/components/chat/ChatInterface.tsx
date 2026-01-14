@@ -1,11 +1,11 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, Scale } from 'lucide-react';
+import { Send, FileText, Scale, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
     api: '/api/chat',
   });
 
@@ -159,6 +159,21 @@ export default function ChatInterface() {
                 <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
                 <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
                 <div className="w-2 h-2 rounded-full bg-sgc-orange-500 loading-dot" />
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl bg-red-50 border border-red-200">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-medium text-red-700 mb-1">Ошибка</div>
+                    <div className="text-sm text-red-600">{error.message}</div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
