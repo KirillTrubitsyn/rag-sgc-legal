@@ -59,12 +59,26 @@ export async function POST(req: Request) {
     const decoder = new TextDecoder();
     let chunkCount = 0;
 
+    let rawSampleLogged = false;
+
     const transformStream = new TransformStream({
       transform(chunk, controller) {
         const text = decoder.decode(chunk, { stream: true });
+
+        // Логируем сырые данные чтобы понять формат
+        if (!rawSampleLogged) {
+          console.log('RAW DATA:', text.substring(0, 500));
+          rawSampleLogged = true;
+        }
+
         const lines = text.split('\n');
 
         for (const line of lines) {
+          // Логируем каждую строку для отладки
+          if (line.trim() && chunkCount < 2) {
+            console.log('LINE:', line.substring(0, 200));
+          }
+
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
 
