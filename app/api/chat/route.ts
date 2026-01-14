@@ -43,6 +43,8 @@ export async function POST(req: Request) {
       }),
     });
 
+    console.log('xAI response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error('xAI API error:', errorText);
@@ -55,33 +57,50 @@ export async function POST(req: Request) {
     // Трансформируем xAI SSE в формат AI SDK
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
+    let chunkCount = 0;
 
     const transformStream = new TransformStream({
       transform(chunk, controller) {
-        const text = decoder.decode(chunk);
+        const text = decoder.decode(chunk, { stream: true });
         const lines = text.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = line.slice(6);
+            const data = line.slice(6).trim();
+
             if (data === '[DONE]') {
-              // Отправляем финальное сообщение
+              console.log('Stream done, total chunks:', chunkCount);
               controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
               return;
             }
+
             try {
               const json = JSON.parse(data);
+
+              // Обычный контент
               const content = json.choices?.[0]?.delta?.content;
-              if (content) {
-                // Формат AI SDK: 0:"текст"
-                controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+              // Reasoning контент (для reasoning моделей)
+              const reasoningContent = json.choices?.[0]?.delta?.reasoning_content;
+
+              const textToSend = content || reasoningContent;
+
+              if (textToSend) {
+                chunkCount++;
+                if (chunkCount <= 3) {
+                  console.log('Chunk', chunkCount, ':', textToSend.substring(0, 50));
+                }
+                controller.enqueue(encoder.encode(`0:${JSON.stringify(textToSend)}\n`));
               }
             } catch (e) {
-              // Игнорируем невалидный JSON
+              // Невалидный JSON - пропускаем
             }
           }
         }
       },
+      flush(controller) {
+        console.log('Stream flush, sending finish');
+        controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+      }
     });
 
     return new Response(response.body?.pipeThrough(transformStream), {
