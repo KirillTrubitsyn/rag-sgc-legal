@@ -3,6 +3,52 @@ import { legalSystemPrompt } from '@/lib/grok-client';
 export const runtime = 'edge';
 export const maxDuration = 60;
 
+// Функция поиска по коллекции
+async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
+  console.log('Searching collection for:', query);
+
+  try {
+    const response = await fetch('https://api.x.ai/v1/collections/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        collection_ids: [collectionId],
+        top_k: 10,
+        retrieval_mode: 'hybrid',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Collection search failed:', response.status, errorText);
+      return '';
+    }
+
+    const data = await response.json();
+    console.log('Search returned', data.results?.length || 0, 'results');
+
+    if (!data.results || data.results.length === 0) {
+      return '';
+    }
+
+    // Форматируем результаты поиска
+    const formattedResults = data.results.map((r: any, i: number) => {
+      const source = r.metadata?.filename || 'Документ';
+      const page = r.metadata?.page ? `, стр. ${r.metadata.page}` : '';
+      return `[${i + 1}] ${source}${page}:\n${r.content}`;
+    }).join('\n\n---\n\n');
+
+    return formattedResults;
+  } catch (error) {
+    console.error('Search error:', error);
+    return '';
+  }
+}
+
 export async function POST(req: Request) {
   console.log('=== Chat API called ===');
 
@@ -20,6 +66,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Получаем последнее сообщение пользователя для поиска
+    const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+    const searchQuery = lastUserMessage?.content || '';
+
+    // Выполняем поиск по коллекции
+    const searchResults = await searchCollection(searchQuery, apiKey, collectionId);
+    console.log('Search results length:', searchResults.length);
+
+    // Формируем контекст с результатами поиска
+    const contextSection = searchResults
+      ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${searchResults}\n\nИспользуйте информацию из найденных документов для ответа.`
+      : '\n\nДокументы не найдены. Сообщите пользователю, что по данному запросу релевантных документов не найдено.';
+
+    const systemPromptWithContext = legalSystemPrompt + contextSection;
+
     const apiMessages = messages.map((m: any) => ({
       role: m.role,
       content: m.content,
@@ -36,7 +97,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: 'grok-4-1-fast-reasoning',
         messages: [
-          { role: 'system', content: legalSystemPrompt },
+          { role: 'system', content: systemPromptWithContext },
           ...apiMessages,
         ],
         stream: true,
