@@ -1,5 +1,5 @@
 import { streamText } from 'ai';
-import { grokModel, legalSystemPrompt, collectionsSearchTool } from '@/lib/xai-client';
+import { createGrokModel, legalSystemPrompt, collectionsSearchTool } from '@/lib/xai-client';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
     // Создаем streaming ответ с помощью streamText
     const result = streamText({
-      model: grokModel,
+      model: createGrokModel(),
       system: legalSystemPrompt,
       messages,
       maxSteps: 5,

@@ -1,14 +1,14 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import type { CoreTool } from 'ai';
 
-// Создание xAI клиента
-const xai = createOpenAI({
-  apiKey: process.env.XAI_API_KEY || '',
-  baseURL: 'https://api.x.ai/v1',
-});
-
-// Grok модель
-export const grokModel = xai('grok-4.1-fast');
+// Функция для создания xAI клиента с актуальным API ключом
+export function createGrokModel() {
+  const xai = createOpenAI({
+    apiKey: process.env.XAI_API_KEY || '',
+    baseURL: 'https://api.x.ai/v1',
+  });
+  return xai('grok-4.1-fast');
+}
 
 // Типы для collections_search tool
 export interface CollectionsSearchParams {
@@ -79,6 +79,3 @@ export const legalSystemPrompt = `Вы — юридический ассисте
 - Дополнительный контекст
 
 Отвечайте профессионально, кратко и точно.`;
-
-// Экспорт xAI клиента для прямого использования
-export { xai };
