@@ -58,7 +58,7 @@ export async function POST(req: Request) {
           parameters: collectionsSearchTool.function.parameters,
           execute: async ({
             query,
-            collection_ids = [collectionId],
+            collection_ids = [collectionId!],
             top_k = 5
           }: {
             query: string;
