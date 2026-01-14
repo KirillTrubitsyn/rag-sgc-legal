@@ -21,7 +21,13 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log('Using collection ID:', collectionId);
+    // Нормализуем collection ID - пробуем оба формата
+    const normalizedCollectionId = collectionId.startsWith('collection_')
+      ? collectionId
+      : `collection_${collectionId}`;
+
+    console.log('Original collection ID:', collectionId);
+    console.log('Normalized collection ID:', normalizedCollectionId);
 
     // Формируем input для Responses API
     const input = messages.map((m: any) => ({
@@ -36,8 +42,8 @@ export async function POST(req: Request) {
       tools: [
         {
           type: 'file_search',
-          vector_store_ids: [collectionId],
-          max_num_results: 10,
+          vector_store_ids: [normalizedCollectionId],
+          max_num_results: 20,
         }
       ],
       stream: true,
@@ -104,6 +110,16 @@ export async function POST(req: Request) {
 
             try {
               const json = JSON.parse(data);
+
+              // Логируем результаты file_search
+              if (json.type === 'response.output_item.done' && json.item?.type === 'file_search_call') {
+                console.log('=== FILE SEARCH COMPLETED ===');
+                console.log('Queries:', JSON.stringify(json.item.queries));
+                console.log('Results count:', json.item.results?.length || 0);
+                if (json.item.results?.length > 0) {
+                  console.log('First result:', JSON.stringify(json.item.results[0]).substring(0, 500));
+                }
+              }
 
               // Responses API format - может быть разный в зависимости от типа события
               // Ищем текстовый контент в разных возможных местах
