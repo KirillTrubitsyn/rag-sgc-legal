@@ -1,28 +1,45 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, Scale, AlertCircle } from 'lucide-react';
+import { Send, FileText, Scale, AlertCircle, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import ReactMarkdown from 'react-markdown';
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
     api: '/api/chat',
   });
+
+  const handleNewQuery = () => {
+    setMessages([]);
+    setInput('');
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient */}
       <header className="sgc-header px-4 py-5 sm:px-6 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
-            <Scale className="w-6 h-6 text-sgc-orange-500" />
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+              <Scale className="w-6 h-6 text-sgc-orange-500" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
+              <p className="text-sm text-white/70">
+                Поиск по документам Юридической службы Сибирской генерирующей компании
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-semibold text-white">RAG SGC Legal</h1>
-            <p className="text-sm text-white/70">
-              Поиск по нормативным документам СГК
-            </p>
-          </div>
+          {messages.length > 0 && (
+            <button
+              onClick={handleNewQuery}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Новый запрос
+            </button>
+          )}
         </div>
       </header>
 
@@ -36,22 +53,26 @@ export default function ChatInterface() {
                 <FileText className="w-10 h-10 text-sgc-orange-500" />
               </div>
               <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-3">
-                Добро пожаловать
+                Юридическая служба СГК
               </h2>
-              <p className="text-sgc-blue-500/60 max-w-md">
-                Задайте вопрос о нормативных документах и стандартах СГК.
-                Система найдёт релевантную информацию в базе знаний.
+              <p className="text-sgc-blue-500/60 max-w-md mb-2">
+                Система поиска по нормативным документам, стандартам и регламентам
+                Юридической службы Сибирской генерирующей компании.
+              </p>
+              <p className="text-sgc-blue-500/50 text-sm max-w-md">
+                Задайте вопрос, и система найдёт релевантную информацию в базе документов.
               </p>
 
               {/* Quick suggestions */}
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 {[
-                  'Требования к безопасности',
-                  'Стандарты качества',
-                  'Правила эксплуатации',
+                  'Порядок подготовки претензий',
+                  'Предъявление исков',
+                  'Регламент работы юристов',
                 ].map((suggestion) => (
                   <button
                     key={suggestion}
+                    onClick={() => setInput(suggestion)}
                     className="px-4 py-2 rounded-full border border-sgc-orange-500/30 text-sgc-orange-500 text-sm hover:bg-sgc-orange-500/5 transition-colors"
                   >
                     {suggestion}
@@ -77,9 +98,33 @@ export default function ChatInterface() {
                       : 'sgc-assistant-bubble text-sgc-blue-500'
                   )}
                 >
-                  {/* Message Content */}
-                  <div className="whitespace-pre-wrap break-words leading-relaxed">
-                    {message.content}
+                  {/* Message Content with Markdown */}
+                  <div className="prose prose-sm max-w-none break-words leading-relaxed prose-headings:font-bold prose-headings:text-sgc-blue-500 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0">
+                    {message.role === 'user' ? (
+                      <span className="whitespace-pre-wrap">{message.content}</span>
+                    ) : (
+                      <ReactMarkdown
+                        components={{
+                          h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
+                          p: ({ children }) => <p className="my-2">{children}</p>,
+                          ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+                          li: ({ children }) => <li className="ml-2">{children}</li>,
+                          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                          em: ({ children }) => <em className="italic">{children}</em>,
+                          code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
+                              {children}
+                            </blockquote>
+                          ),
+                        }}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    )}
                   </div>
 
                   {/* Tool Invocations - Search Results */}
