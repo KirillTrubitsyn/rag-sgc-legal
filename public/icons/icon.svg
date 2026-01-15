@@ -1,40 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Background -->
-  <rect width="512" height="512" rx="80" fill="#1e3a5f"/>
-
-  <!-- Hexagon border -->
-  <path d="M256 60 L420 154.5 L420 343.5 L256 438 L92 343.5 L92 154.5 Z"
-        fill="none"
-        stroke="#f7941d"
-        stroke-width="12"/>
-
-  <!-- Document background -->
-  <rect x="160" y="120" width="160" height="200" rx="12" fill="#f5f5f5"/>
-
-  <!-- Document corner fold -->
-  <path d="M270 120 L320 120 L320 170 L270 170 Z" fill="#e0e0e0"/>
-  <path d="M270 120 L270 170 L320 170" fill="none" stroke="#ccc" stroke-width="2"/>
-
+  <rect width="512" height="512" rx="64" fill="#1e3a5f"/>
+  <g fill="#f7941d">
+    <!-- Scale/Balance icon -->
+    <rect x="240" y="80" width="32" height="200" rx="4"/>
+    <circle cx="256" cy="80" r="24"/>
+    <rect x="120" y="160" width="272" height="16" rx="8"/>
+    <!-- Left pan -->
+    <path d="M120 176 L80 280 Q80 300 100 300 L180 300 Q200 300 200 280 L160 176 Z"/>
+    <!-- Right pan -->
+    <path d="M352 176 L312 280 Q312 300 332 300 L412 300 Q432 300 432 280 L392 176 Z"/>
+    <!-- Chains -->
+    <rect x="136" y="176" width="8" height="60"/>
+    <rect x="368" y="176" width="8" height="60"/>
+  </g>
   <!-- Document lines -->
-  <rect x="180" y="260" width="110" height="10" rx="5" fill="#f7941d"/>
-  <rect x="180" y="285" width="80" height="10" rx="5" fill="#f7941d"/>
-
-  <!-- Network/Graph nodes -->
-  <circle cx="200" cy="175" r="16" fill="#f7941d"/>
-  <circle cx="280" cy="155" r="16" fill="#f7941d"/>
-  <circle cx="255" cy="215" r="16" fill="#f7941d"/>
-  <circle cx="175" cy="220" r="16" fill="#f7941d"/>
-  <circle cx="300" cy="210" r="16" fill="#f7941d"/>
-
-  <!-- Network/Graph lines -->
-  <line x1="200" y1="175" x2="280" y2="155" stroke="#f7941d" stroke-width="6"/>
-  <line x1="200" y1="175" x2="255" y2="215" stroke="#f7941d" stroke-width="6"/>
-  <line x1="200" y1="175" x2="175" y2="220" stroke="#f7941d" stroke-width="6"/>
-  <line x1="280" y1="155" x2="255" y2="215" stroke="#f7941d" stroke-width="6"/>
-  <line x1="280" y1="155" x2="300" y2="210" stroke="#f7941d" stroke-width="6"/>
-  <line x1="255" y1="215" x2="300" y2="210" stroke="#f7941d" stroke-width="6"/>
-  <line x1="255" y1="215" x2="175" y2="220" stroke="#f7941d" stroke-width="6"/>
-
-  <!-- SGC Text -->
-  <text x="256" y="400" text-anchor="middle" fill="#f7941d" font-family="Arial, sans-serif" font-size="64" font-weight="bold">SGC</text>
+  <g fill="#ffffff" opacity="0.3">
+    <rect x="160" y="340" width="192" height="12" rx="6"/>
+    <rect x="160" y="370" width="160" height="12" rx="6"/>
+    <rect x="160" y="400" width="192" height="12" rx="6"/>
+  </g>
+  <!-- SGK text -->
+  <text x="256" y="470" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="48" font-weight="bold">СГК</text>
 </svg>
