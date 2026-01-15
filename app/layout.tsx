@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Юридическая служба СГК',
-  description: 'Система поиска по документам Юридической службы Сибирской генерирующей компании',
+  description: 'Поиск по внутренним документам Юридической службы СГК',
 };
 
 export default function RootLayout({
