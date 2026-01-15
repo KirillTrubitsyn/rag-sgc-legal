@@ -1,10 +1,9 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, FileText, Scale, AlertCircle, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
-import Image from 'next/image';
 
 export default function ChatInterface() {
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
@@ -18,48 +17,27 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-4 py-4 sm:px-6 shadow-sm">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          {/* Logo Section */}
-          <div className="flex items-center gap-4">
-            {/* Hexagon Logo */}
-            <div className="w-14 h-14 flex-shrink-0">
-              <Image
-                src="/icons/logo.svg"
-                alt="SGC Legal Search"
-                width={56}
-                height={56}
-                priority
-              />
+      {/* Header with SGC Gradient */}
+      <header className="sgc-header px-4 py-5 sm:px-6 shadow-lg">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+              <Scale className="w-6 h-6 text-sgc-orange-500" />
             </div>
-
-            {/* SGC Text */}
-            <div className="flex items-center gap-4">
-              <div>
-                <div className="text-2xl font-bold text-sgc-orange-500">SGC</div>
-                <div className="text-sm text-sgc-orange-500">Legal Search</div>
-              </div>
-
-              {/* Vertical Divider */}
-              <div className="hidden sm:block w-px h-10 bg-sgc-orange-500"></div>
-
-              {/* Russian Text */}
-              <div className="hidden sm:block">
-                <div className="text-base font-medium text-slate-400">Юридическая служба СГК</div>
-                <div className="text-sm text-slate-300">Поиск по внутренним документам</div>
-              </div>
+            <div>
+              <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
+              <p className="text-sm text-white/70">
+                Поиск по внутренним документам
+              </p>
             </div>
           </div>
-
-          {/* New Query Button */}
           {messages.length > 0 && (
             <button
               onClick={handleNewQuery}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sgc-orange-500/10 hover:bg-sgc-orange-500/20 text-sgc-orange-500 text-sm transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
-              <span className="hidden sm:inline">Новый запрос</span>
+              Новый запрос
             </button>
           )}
         </div>
@@ -71,34 +49,17 @@ export default function ChatInterface() {
           {messages.length === 0 ? (
             // Empty State
             <div className="flex flex-col items-center justify-center h-full text-center py-16">
-              {/* Large Logo */}
-              <div className="w-24 h-24 mb-6">
-                <Image
-                  src="/icons/logo.svg"
-                  alt="SGC Legal Search"
-                  width={96}
-                  height={96}
-                  priority
-                />
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-sgc-orange-500/10 to-sgc-orange-500/5 flex items-center justify-center mb-6">
+                <FileText className="w-10 h-10 text-sgc-orange-500" />
               </div>
-
-              {/* Title */}
-              <div className="flex items-center gap-3 mb-4">
-                <div>
-                  <div className="text-3xl font-bold text-sgc-orange-500">SGC</div>
-                  <div className="text-lg text-sgc-orange-500">Legal Search</div>
-                </div>
-                <div className="w-px h-12 bg-sgc-orange-500/50"></div>
-                <div className="text-left">
-                  <div className="text-lg font-medium text-slate-500">Юридическая служба СГК</div>
-                  <div className="text-sm text-slate-400">Поиск по внутренним документам</div>
-                </div>
-              </div>
-
-              <p className="text-slate-400 max-w-md mb-2 mt-4">
-                Система поиска по внутренним нормативным документам, стандартам и регламентам.
+              <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-3">
+                Юридическая служба СГК
+              </h2>
+              <p className="text-sgc-blue-500/60 max-w-md mb-2">
+                Система поиска по внутренним нормативным документам, стандартам и регламентам
+                Юридической службы СГК.
               </p>
-              <p className="text-slate-300 text-sm max-w-md">
+              <p className="text-sgc-blue-500/50 text-sm max-w-md">
                 Задайте вопрос, и система найдёт релевантную информацию в базе документов.
               </p>
 
