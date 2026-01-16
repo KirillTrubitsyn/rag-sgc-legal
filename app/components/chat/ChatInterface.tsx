@@ -1,7 +1,8 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, Scale, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw } from 'lucide-react';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 
@@ -20,17 +21,14 @@ export default function ChatInterface() {
       {/* Header with SGC Gradient */}
       <header className="sgc-header px-4 py-5 sm:px-6 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
-              <Scale className="w-6 h-6 text-sgc-orange-500" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
-              <p className="text-sm text-white/70">
-                Поиск по внутренним документам
-              </p>
-            </div>
-          </div>
+          <Image
+            src="/sgc_search_horizontal_logo.png"
+            alt="Юридическая служба СГК - Поиск по внутренним документам"
+            width={320}
+            height={60}
+            priority
+            className="h-12 w-auto"
+          />
           {messages.length > 0 && (
             <button
               onClick={handleNewQuery}
