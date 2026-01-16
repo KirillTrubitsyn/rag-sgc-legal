@@ -19,15 +19,15 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient */}
-      <header className="sgc-header px-4 py-3 sm:px-6 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+      <header className="sgc-header px-4 h-24 sm:px-6 shadow-lg flex items-center">
+        <div className="max-w-4xl mx-auto w-full flex items-center justify-between">
           <Image
             src="/sgc_search_horizontal_logo.png"
             alt="Юридическая служба СГК - Поиск по внутренним документам"
             width={1000}
             height={200}
             priority
-            className="h-40 w-auto"
+            className="h-16 w-auto"
           />
           {messages.length > 0 && (
             <button
