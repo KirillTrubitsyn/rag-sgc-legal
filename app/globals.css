@@ -18,9 +18,9 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* SGC Gradient Header */
+/* SGC Header - solid color matching icon background */
 .sgc-header {
-  background: linear-gradient(135deg, var(--sgc-blue-900) 0%, var(--sgc-blue-500) 100%);
+  background: #192231;
 }
 
 /* User message bubble with orange gradient */
