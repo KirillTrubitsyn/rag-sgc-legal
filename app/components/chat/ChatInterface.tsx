@@ -22,7 +22,7 @@ export default function ChatInterface() {
       <header className="sgc-header px-4 h-[100px] sm:px-6 shadow-lg flex items-center">
         <div className="max-w-4xl mx-auto w-full flex items-center justify-between">
           <Image
-            src="/sgc_search_horizontal_logo.png"
+            src="/sgc_search_horizontal_logo_edited.png"
             alt="Юридическая служба СГК - Поиск по внутренним документам"
             width={1000}
             height={200}
