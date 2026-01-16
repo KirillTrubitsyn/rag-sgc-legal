@@ -21,8 +21,8 @@ export default function ChatInterface() {
       <header className="sgc-header px-4 py-4 sm:px-6 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
-              <img src="/icon-512.png" alt="СГК" className="w-10 h-10 object-contain" />
+            <div className="w-14 h-14 flex items-center justify-center">
+              <img src="/icon-512.png" alt="СГК" className="w-14 h-14 object-contain" />
             </div>
             <div>
               <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
