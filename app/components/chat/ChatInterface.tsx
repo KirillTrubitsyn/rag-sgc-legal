@@ -19,16 +19,26 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient */}
-      <header className="sgc-header px-4 h-[120px] sm:px-6 shadow-lg flex items-center">
-        <div className="max-w-4xl mx-auto w-full flex items-center justify-between">
-          <Image
-            src="/sgc_search_horizontal_logo_edited.png"
-            alt="Юридическая служба СГК - Поиск по внутренним документам"
-            width={1000}
-            height={200}
-            priority
-            className="h-[115px] w-auto"
-          />
+      <header className="sgc-header px-4 py-3 sm:px-6 shadow-lg">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Image
+              src="/icon-512.png"
+              alt="SGC"
+              width={512}
+              height={512}
+              priority
+              className="w-14 h-14"
+            />
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-bold text-white">SGC</span>
+                <span className="text-lg text-sgc-orange-400">Legal Search</span>
+              </div>
+              <div className="text-sm text-white/90">Юридическая служба СГК</div>
+              <div className="text-xs text-white/60">Поиск по внутренним документам</div>
+            </div>
+          </div>
           {messages.length > 0 && (
             <button
               onClick={handleNewQuery}
