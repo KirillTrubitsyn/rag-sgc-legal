@@ -1,7 +1,8 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, Scale, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw } from 'lucide-react';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 
@@ -20,13 +21,23 @@ export default function ChatInterface() {
       {/* Header with SGC Gradient */}
       <header className="sgc-header px-4 py-4 sm:px-6 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-              <Scale className="w-7 h-7 text-sgc-orange-500" />
+          <div className="flex items-center gap-4">
+            <Image
+              src="/icon-512.png"
+              alt="SGC"
+              width={56}
+              height={56}
+              priority
+              className="w-14 h-14"
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="text-xl font-bold text-white">SGC</span>
+              <span className="text-sm text-sgc-orange-400">Legal Search</span>
             </div>
-            <div>
-              <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
-              <p className="text-sm text-white/70">Поиск по внутренним документам</p>
+            <div className="w-px h-12 bg-white/30 mx-2"></div>
+            <div className="flex flex-col">
+              <span className="text-lg font-semibold text-white">Юридическая служба СГК</span>
+              <span className="text-sm text-white/70">Поиск по внутренним документам</span>
             </div>
           </div>
           {messages.length > 0 && (
