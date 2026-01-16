@@ -19,7 +19,7 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient */}
-      <header className="sgc-header px-4 py-3 sm:px-6 shadow-lg">
+      <header className="sgc-header px-4 py-4 sm:px-6 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Image
