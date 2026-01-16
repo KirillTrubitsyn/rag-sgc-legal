@@ -1,7 +1,7 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { Send, FileText, Scale, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 
@@ -21,8 +21,8 @@ export default function ChatInterface() {
       <header className="sgc-header px-4 py-4 sm:px-6 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-              <Scale className="w-7 h-7 text-sgc-orange-500" />
+            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
+              <img src="/icon-192.png" alt="СГК" className="w-10 h-10 object-contain" />
             </div>
             <div>
               <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
