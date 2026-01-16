@@ -22,7 +22,7 @@ export default function ChatInterface() {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
-              <img src="/icon-192.png" alt="СГК" className="w-10 h-10 object-contain" />
+              <img src="/icon-512.png" alt="СГК" className="w-10 h-10 object-contain" />
             </div>
             <div>
               <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
