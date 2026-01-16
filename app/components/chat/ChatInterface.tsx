@@ -19,7 +19,7 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient */}
-      <header className="sgc-header px-4 h-20 sm:px-6 shadow-lg flex items-center">
+      <header className="sgc-header px-4 h-[60px] sm:px-6 shadow-lg flex items-center">
         <div className="max-w-4xl mx-auto w-full flex items-center justify-between">
           <Image
             src="/sgc_search_horizontal_logo.png"
@@ -27,7 +27,7 @@ export default function ChatInterface() {
             width={1000}
             height={200}
             priority
-            className="h-16 w-auto"
+            className="h-10 w-auto"
           />
           {messages.length > 0 && (
             <button
