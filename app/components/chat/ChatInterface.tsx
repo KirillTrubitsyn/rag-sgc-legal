@@ -24,10 +24,10 @@ export default function ChatInterface() {
           <Image
             src="/sgc_search_horizontal_logo.png"
             alt="Юридическая служба СГК - Поиск по внутренним документам"
-            width={320}
-            height={60}
+            width={400}
+            height={80}
             priority
-            className="h-12 w-auto"
+            className="h-16 w-auto"
           />
           {messages.length > 0 && (
             <button
