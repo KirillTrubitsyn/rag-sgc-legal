@@ -24,9 +24,14 @@ export default function ChatInterface() {
             <div className="w-20 h-20 flex items-center justify-center -ml-2">
               <img src="/icon-512.png" alt="СГК" className="w-20 h-20 object-contain" />
             </div>
+            <div className="flex flex-col">
+              <span className="text-xl font-bold"><span className="text-sgc-orange-500">SGC</span> <span className="text-white">Legal</span></span>
+              <span className="text-xl font-bold text-white">Search</span>
+            </div>
+            <div className="h-12 w-px bg-white/30 mx-2"></div>
             <div>
               <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
-              <p className="text-sm text-white/70">Поиск по внутренним документам</p>
+              <p className="text-sm text-white/50">Поиск по внутренним документам</p>
             </div>
           </div>
           {messages.length > 0 && (
