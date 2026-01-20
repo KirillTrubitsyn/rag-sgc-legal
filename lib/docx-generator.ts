@@ -322,11 +322,11 @@ function createBulletParagraph(text: string): Paragraph {
 }
 
 /**
- * Создаёт параграф цитаты с левой границей (как на сайте)
+ * Создаёт параграф цитаты с голубой заливкой и оранжевой линией слева
  */
 function createQuoteParagraph(text: string): Paragraph {
   // Убираем кавычки если они уже есть
-  let cleanText = text.replace(/^[«"']|[»"']$/g, '').trim();
+  const cleanText = text.replace(/^[«"']|[»"']$/g, '').trim();
 
   return new Paragraph({
     children: [
@@ -339,18 +339,22 @@ function createQuoteParagraph(text: string): Paragraph {
     ],
     alignment: AlignmentType.JUSTIFIED,
     indent: {
-      left: convertInchesToTwip(0.3), // Отступ слева
+      left: convertInchesToTwip(0.3),
     },
     border: {
       left: {
         color: 'E87722', // Оранжевый цвет SGC
         style: BorderStyle.SINGLE,
-        size: 12, // Толщина линии (тоньше)
+        size: 12,
         space: 10,
       },
     },
+    shading: {
+      type: 'clear',
+      fill: 'E8F4FC', // Лёгкий голубой фон
+    },
     spacing: {
-      before: 80,
+      before: 120,
       after: 40,
       line: 276,
     },
@@ -358,32 +362,28 @@ function createQuoteParagraph(text: string): Paragraph {
 }
 
 /**
- * Создаёт параграф источника цитаты (с оранжевой линией слева, как у цитаты)
+ * Создаёт параграф источника цитаты (без заливки, без тире)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
+  // Убираем тире в начале
+  const cleanSource = text.replace(/^[—―-]\s*/, '').trim();
+
   return new Paragraph({
     children: [
       new TextRun({
-        text: text,
+        text: cleanSource,
         font: FONT_NAME,
         size: FONT_SIZE_SMALL,
         color: '666666',
+        italics: true,
       }),
     ],
     indent: {
       left: convertInchesToTwip(0.3),
     },
-    border: {
-      left: {
-        color: 'E87722', // Оранжевый цвет SGC - связь с цитатой
-        style: BorderStyle.SINGLE,
-        size: 12,
-        space: 10,
-      },
-    },
     spacing: {
       before: 0,
-      after: 200, // Больший отступ после источника для разделения цитат
+      after: 280, // Большой отступ после для разделения цитат
     },
   });
 }
