@@ -34,7 +34,7 @@ const FONT_SIZE_FOOTER = 16; // 8pt
 const MARGIN_LEFT = convertInchesToTwip(1.18); // ~3cm
 const MARGIN_RIGHT = convertInchesToTwip(0.79); // ~2cm
 const MARGIN_TOP = convertInchesToTwip(0.59); // ~1.5cm
-const MARGIN_BOTTOM = convertInchesToTwip(0.59); // ~1.5cm
+const MARGIN_BOTTOM = convertInchesToTwip(0.98); // ~2.5cm
 const FIRST_LINE_INDENT = convertInchesToTwip(0.49); // ~1.25cm
 
 interface ExportOptions {
@@ -130,9 +130,9 @@ function parseTextToParagraphs(text: string): Paragraph[] {
       continue;
     }
 
-    // Секционные заголовки с буквами (A., B., C.)
-    const letterSectionMatch = stripped.match(/^([A-ZА-Я])\.\s+(.*)$/);
-    if (letterSectionMatch && stripped.length < 100) {
+    // Секционные заголовки с буквами (A., B., C.) - но не "C#" и подобные
+    const letterSectionMatch = stripped.match(/^([A-ZА-Я])\.\s+([^#].*)$/);
+    if (letterSectionMatch && stripped.length < 100 && !stripped.includes('#')) {
       if (currentParagraphText) {
         paragraphs.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
@@ -358,7 +358,7 @@ function createQuoteParagraph(text: string): Paragraph {
 }
 
 /**
- * Создаёт параграф источника цитаты
+ * Создаёт параграф источника цитаты (с оранжевой линией слева, как у цитаты)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
   return new Paragraph({
@@ -373,9 +373,17 @@ function createQuoteSourceParagraph(text: string): Paragraph {
     indent: {
       left: convertInchesToTwip(0.3),
     },
+    border: {
+      left: {
+        color: 'E87722', // Оранжевый цвет SGC - связь с цитатой
+        style: BorderStyle.SINGLE,
+        size: 12,
+        space: 10,
+      },
+    },
     spacing: {
       before: 0,
-      after: 120,
+      after: 200, // Больший отступ после источника для разделения цитат
     },
   });
 }
@@ -565,7 +573,7 @@ async function createTitleSection(title?: string): Promise<(Paragraph | Table)[]
     elements.push(
       new Paragraph({
         children: [],
-        spacing: { before: 400 },
+        spacing: { before: 100 },
       })
     );
     elements.push(headerTable);
@@ -583,7 +591,7 @@ async function createTitleSection(title?: string): Promise<(Paragraph | Table)[]
         ],
         alignment: AlignmentType.CENTER,
         spacing: {
-          before: 400,
+          before: 100,
           after: 160,
         },
       })
