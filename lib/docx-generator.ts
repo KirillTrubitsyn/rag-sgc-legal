@@ -322,7 +322,7 @@ function createBulletParagraph(text: string): Paragraph {
 }
 
 /**
- * Создаёт параграф цитаты с голубой заливкой и оранжевой линией слева
+ * Создаёт параграф цитаты с оранжевой линией слева (как на сайте)
  */
 function createQuoteParagraph(text: string): Paragraph {
   // Убираем кавычки если они уже есть
@@ -335,55 +335,51 @@ function createQuoteParagraph(text: string): Paragraph {
         font: FONT_NAME,
         size: FONT_SIZE_NORMAL,
         italics: true,
+        color: '1e3a5f', // Тёмно-синий как на сайте
       }),
     ],
     alignment: AlignmentType.JUSTIFIED,
     indent: {
-      left: convertInchesToTwip(0.3),
+      left: convertInchesToTwip(0.2),
     },
     border: {
       left: {
         color: 'E87722', // Оранжевый цвет SGC
         style: BorderStyle.SINGLE,
-        size: 12,
-        space: 10,
+        size: 18,
+        space: 8,
       },
     },
-    shading: {
-      type: 'clear',
-      fill: 'E8F4FC', // Лёгкий голубой фон
-    },
     spacing: {
-      before: 120,
-      after: 40,
+      before: 160,
+      after: 60,
       line: 276,
     },
   });
 }
 
 /**
- * Создаёт параграф источника цитаты (без заливки, без тире)
+ * Создаёт параграф источника цитаты (серый мелкий текст с тире)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
-  // Убираем тире в начале
+  // Убираем тире если есть и добавляем своё
   const cleanSource = text.replace(/^[—―-]\s*/, '').trim();
 
   return new Paragraph({
     children: [
       new TextRun({
-        text: cleanSource,
+        text: `— ${cleanSource}`,
         font: FONT_NAME,
         size: FONT_SIZE_SMALL,
         color: '666666',
-        italics: true,
       }),
     ],
     indent: {
-      left: convertInchesToTwip(0.3),
+      left: convertInchesToTwip(0.35),
     },
     spacing: {
       before: 0,
-      after: 280, // Большой отступ после для разделения цитат
+      after: 240,
     },
   });
 }
