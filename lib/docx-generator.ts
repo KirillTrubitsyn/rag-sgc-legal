@@ -178,6 +178,27 @@ function parseTextToParagraphs(text: string): Paragraph[] {
       continue;
     }
 
+    // Цитаты (строки начинающиеся с ">")
+    if (stripped.startsWith('> ') || stripped.startsWith('>')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      const quoteText = stripped.replace(/^>\s*/, '');
+      paragraphs.push(createQuoteParagraph(quoteText));
+      continue;
+    }
+
+    // Источник цитаты (строки начинающиеся с "—" или "— ")
+    if (stripped.startsWith('—') || stripped.startsWith('― ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createQuoteSourceParagraph(stripped));
+      continue;
+    }
+
     // Подзаголовки (короткие строки с заглавной буквы без точки в конце)
     if (
       stripped.length < 60 &&
@@ -277,6 +298,65 @@ function createBulletParagraph(text: string): Paragraph {
     spacing: {
       before: 20,
       after: 20,
+    },
+  });
+}
+
+/**
+ * Создаёт параграф цитаты с левой границей (как на сайте)
+ */
+function createQuoteParagraph(text: string): Paragraph {
+  // Убираем кавычки если они уже есть
+  let cleanText = text.replace(/^[«"']|[»"']$/g, '').trim();
+
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: `«${cleanText}»`,
+        font: FONT_NAME,
+        size: FONT_SIZE_NORMAL,
+        italics: true,
+      }),
+    ],
+    alignment: AlignmentType.JUSTIFIED,
+    indent: {
+      left: convertInchesToTwip(0.3), // Отступ слева
+    },
+    border: {
+      left: {
+        color: 'E87722', // Оранжевый цвет SGC
+        style: BorderStyle.SINGLE,
+        size: 24, // Толщина линии
+        space: 8,
+      },
+    },
+    spacing: {
+      before: 80,
+      after: 40,
+      line: 276,
+    },
+  });
+}
+
+/**
+ * Создаёт параграф источника цитаты
+ */
+function createQuoteSourceParagraph(text: string): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: text,
+        font: FONT_NAME,
+        size: FONT_SIZE_SMALL,
+        color: '666666',
+      }),
+    ],
+    indent: {
+      left: convertInchesToTwip(0.3),
+    },
+    spacing: {
+      before: 0,
+      after: 120,
     },
   });
 }
