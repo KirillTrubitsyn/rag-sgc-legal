@@ -11,6 +11,7 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
 
   try {
     // Правильная структура запроса для xAI Documents Search API
+    // Увеличено до 30 результатов для полноты цитат (по замечаниям тестировщиков)
     const requestBody = {
       query: query,
       source: {
@@ -19,8 +20,8 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       retrieval_mode: {
         type: 'hybrid'
       },
-      max_num_results: 20,
-      top_k: 20
+      max_num_results: 30,
+      top_k: 30
     };
 
     console.log('Search request:', JSON.stringify(requestBody));
