@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Scale, Quote } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Quote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
@@ -26,15 +26,15 @@ function SummaryBlock({ text }: { text: string }) {
   );
 }
 
-// Компонент для отображения блока "Правовое обоснование"
-function LegalBasisBlock({ items }: { items: ParsedResponse['legalBasis'] }) {
+// Компонент для отображения блока "Ссылки на документы"
+function DocumentReferencesBlock({ items }: { items: ParsedResponse['legalBasis'] }) {
   if (!items || items.length === 0) return null;
 
   return (
     <div className="mt-4 rounded-lg border border-sgc-blue-200 overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2 bg-sgc-blue-50 border-b border-sgc-blue-200">
-        <Scale className="w-4 h-4 text-sgc-blue-600" />
-        <span className="font-medium text-sgc-blue-700 text-sm">Правовое обоснование</span>
+        <Link2 className="w-4 h-4 text-sgc-blue-600" />
+        <span className="font-medium text-sgc-blue-700 text-sm">Ссылки на документы</span>
       </div>
       <div className="px-4 py-3 space-y-2">
         {items.map((item, idx) => (
@@ -135,7 +135,7 @@ function StructuredResponse({ content }: { content: string }) {
   return (
     <div>
       <SummaryBlock text={parsed.summary} />
-      <LegalBasisBlock items={parsed.legalBasis} />
+      <DocumentReferencesBlock items={parsed.legalBasis} />
       <CollapsibleQuotesBlock quotes={parsed.quotes} />
     </div>
   );
