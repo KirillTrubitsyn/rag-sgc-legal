@@ -153,19 +153,19 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
-      {/* Header with SGC Gradient */}
-      <header className="sgc-header px-4 py-4 sm:px-6 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-20 h-20 flex items-center justify-center -ml-2">
-              <img src="/icon-512.png" alt="СГК" className="w-20 h-20 object-contain" />
+      {/* Header with SGC Gradient - compact on mobile */}
+      <header className="sgc-header px-3 py-2 sm:px-6 sm:py-4 shadow-lg">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-16 sm:h-16 flex items-center justify-center flex-shrink-0">
+              <img src="/icon-512.png" alt="СГК" className="w-10 h-10 sm:w-16 sm:h-16 object-contain" />
             </div>
             <div className="flex flex-col">
-              <span className="text-xl font-bold"><span className="text-sgc-orange-500">SGC</span> <span className="text-white">Legal</span></span>
-              <span className="text-xl font-bold text-white">Search</span>
+              <span className="text-base sm:text-xl font-bold"><span className="text-sgc-orange-500">SGC</span> <span className="text-white">Legal</span></span>
+              <span className="text-base sm:text-xl font-bold text-white">Search</span>
             </div>
-            <div className="h-12 w-px bg-white/30 mx-2"></div>
-            <div>
+            <div className="hidden sm:block h-12 w-px bg-white/30 mx-2"></div>
+            <div className="hidden sm:block">
               <h1 className="text-xl font-semibold text-white">Юридическая служба СГК</h1>
               <p className="text-sm text-white/50">Поиск по внутренним документам</p>
             </div>
@@ -173,17 +173,17 @@ export default function ChatInterface() {
           {messages.length > 0 && (
             <button
               onClick={handleNewQuery}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm transition-colors flex-shrink-0"
             >
-              <RotateCcw className="w-4 h-4" />
-              Новый запрос
+              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>Новый</span>
             </button>
           )}
         </div>
       </header>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+      <div className="flex-1 overflow-y-auto px-2 py-4 sm:px-6 sm:py-6">
         <div className="max-w-4xl mx-auto space-y-4">
           {messages.length === 0 ? (
             // Empty State
@@ -231,10 +231,10 @@ export default function ChatInterface() {
               >
                 <div
                   className={cn(
-                    'max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl',
+                    'px-3 sm:px-4 py-3 rounded-2xl',
                     message.role === 'user'
-                      ? 'sgc-user-bubble'
-                      : 'sgc-assistant-bubble text-sgc-blue-500'
+                      ? 'max-w-[85%] sm:max-w-[75%] sgc-user-bubble'
+                      : 'w-full sm:max-w-[90%] sgc-assistant-bubble text-sgc-blue-500'
                   )}
                 >
                   {/* Message Content with Markdown */}
