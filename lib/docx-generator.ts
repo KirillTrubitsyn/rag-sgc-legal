@@ -12,6 +12,12 @@ import {
   convertInchesToTwip,
   HeadingLevel,
   BorderStyle,
+  ImageRun,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  VerticalAlign,
 } from 'docx';
 import { saveAs } from 'file-saver';
 import { Packer } from 'docx';
@@ -36,6 +42,19 @@ interface ExportOptions {
   answer: string;
   title?: string;
   createdAt?: Date;
+}
+
+/**
+ * Загружает изображение как ArrayBuffer для вставки в документ
+ */
+async function loadImage(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.arrayBuffer();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -326,8 +345,8 @@ function createQuoteParagraph(text: string): Paragraph {
       left: {
         color: 'E87722', // Оранжевый цвет SGC
         style: BorderStyle.SINGLE,
-        size: 24, // Толщина линии
-        space: 8,
+        size: 12, // Толщина линии (тоньше)
+        space: 10,
       },
     },
     spacing: {
@@ -463,6 +482,126 @@ function createDocumentFooter(createdAt?: Date): Paragraph[] {
 }
 
 /**
+ * Создаёт заголовок документа с лого слева
+ */
+async function createTitleSection(title?: string): Promise<(Paragraph | Table)[]> {
+  const elements: (Paragraph | Table)[] = [];
+
+  // Загружаем лого
+  const logoData = await loadImage('/icon-512.png');
+
+  if (logoData) {
+    // Таблица с лого слева и заголовком справа
+    const headerTable = new Table({
+      width: {
+        size: 100,
+        type: WidthType.PERCENTAGE,
+      },
+      rows: [
+        new TableRow({
+          children: [
+            // Ячейка с лого
+            new TableCell({
+              width: {
+                size: 15,
+                type: WidthType.PERCENTAGE,
+              },
+              verticalAlign: VerticalAlign.CENTER,
+              borders: {
+                top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+              },
+              children: [
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: logoData,
+                      transformation: {
+                        width: 60,
+                        height: 60,
+                      },
+                      type: 'png',
+                    }),
+                  ],
+                  alignment: AlignmentType.LEFT,
+                }),
+              ],
+            }),
+            // Ячейка с заголовком
+            new TableCell({
+              width: {
+                size: 85,
+                type: WidthType.PERCENTAGE,
+              },
+              verticalAlign: VerticalAlign.CENTER,
+              borders: {
+                top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+                right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+              },
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: title || 'РЕЗУЛЬТАТЫ ПОИСКА',
+                      bold: true,
+                      font: FONT_NAME,
+                      size: FONT_SIZE_TITLE,
+                    }),
+                  ],
+                  alignment: AlignmentType.LEFT,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+
+    // Отступ сверху
+    elements.push(
+      new Paragraph({
+        children: [],
+        spacing: { before: 400 },
+      })
+    );
+    elements.push(headerTable);
+  } else {
+    // Без лого - просто заголовок с отступом сверху
+    elements.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: title || 'РЕЗУЛЬТАТЫ ПОИСКА',
+            bold: true,
+            font: FONT_NAME,
+            size: FONT_SIZE_TITLE,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: {
+          before: 400,
+          after: 160,
+        },
+      })
+    );
+  }
+
+  // Пустая строка после заголовка
+  elements.push(
+    new Paragraph({
+      children: [],
+      spacing: { after: 200 },
+    })
+  );
+
+  return elements;
+}
+
+/**
  * Создаёт и экспортирует документ DOCX
  */
 export async function exportToDocx(options: ExportOptions): Promise<void> {
@@ -474,25 +613,11 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
   // Извлекаем источники
   const { cleanText, sources } = extractSources(cleanAnswer);
 
-  // Создаём параграфы для заголовка
-  const titleParagraphs: Paragraph[] = [
-    // Заголовок документа
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: title || 'РЕЗУЛЬТАТЫ ПОИСКА',
-          bold: true,
-          font: FONT_NAME,
-          size: FONT_SIZE_TITLE,
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: {
-        before: 0,
-        after: 160,
-      },
-    }),
-  ];
+  // Создаём заголовок с лого
+  const titleElements = await createTitleSection(title);
+
+  // Дополнительные параграфы для заголовка
+  const titleParagraphs: Paragraph[] = [];
 
   // Добавляем вопрос, если он есть
   if (question) {
@@ -527,8 +652,9 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
   // Создаём футер документа
   const footerParagraphs = createDocumentFooter(createdAt);
 
-  // Собираем все параграфы
-  const allParagraphs = [
+  // Собираем все элементы документа
+  const allElements = [
+    ...titleElements,
     ...titleParagraphs,
     ...contentParagraphs,
     ...sourcesParagraphs,
@@ -566,7 +692,7 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
             ],
           }),
         },
-        children: allParagraphs,
+        children: allElements,
       },
     ],
   });
