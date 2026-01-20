@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Quote } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
@@ -26,38 +26,8 @@ function SummaryBlock({ text }: { text: string }) {
   );
 }
 
-// Компонент для отображения блока "Ссылки на документы"
-function DocumentReferencesBlock({ items }: { items: ParsedResponse['legalBasis'] }) {
-  if (!items || items.length === 0) return null;
-
-  return (
-    <div className="mt-4 rounded-lg border border-sgc-blue-200 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2 bg-sgc-blue-50 border-b border-sgc-blue-200">
-        <Link2 className="w-4 h-4 text-sgc-blue-600" />
-        <span className="font-medium text-sgc-blue-700 text-sm">Ссылки на документы</span>
-      </div>
-      <div className="px-4 py-3 space-y-2">
-        {items.map((item, idx) => (
-          <div key={idx} className="flex gap-2 text-sm">
-            <span className="font-semibold text-sgc-orange-600 whitespace-nowrap">{item.norm}</span>
-            {item.document && (
-              <span className="text-sgc-blue-400">({item.document})</span>
-            )}
-            {item.description && (
-              <>
-                <span className="text-sgc-blue-300">—</span>
-                <span className="text-sgc-blue-600">{item.description}</span>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Компонент сворачиваемого блока цитат
-function CollapsibleQuotesBlock({ quotes }: { quotes: QuoteItem[] }) {
+// Компонент сворачиваемого блока "Ссылки на документы" (объединяет ссылки и цитаты)
+function CollapsibleDocumentsBlock({ quotes }: { quotes: QuoteItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
 
   if (!quotes || quotes.length === 0) return null;
@@ -69,8 +39,8 @@ function CollapsibleQuotesBlock({ quotes }: { quotes: QuoteItem[] }) {
         className="w-full flex items-center justify-between px-4 py-3 bg-sgc-blue-700/10 hover:bg-sgc-blue-700/15 transition-colors text-left"
       >
         <div className="flex items-center gap-2">
-          <Quote className="w-4 h-4 text-sgc-blue-700" />
-          <span className="font-medium text-sgc-blue-700">Подробные цитаты ({quotes.length})</span>
+          <Link2 className="w-4 h-4 text-sgc-blue-700" />
+          <span className="font-medium text-sgc-blue-700">Ссылки на документы ({quotes.length})</span>
         </div>
         {isOpen ? (
           <ChevronUp className="w-5 h-5 text-sgc-blue-700" />
@@ -81,7 +51,7 @@ function CollapsibleQuotesBlock({ quotes }: { quotes: QuoteItem[] }) {
       <div
         className={cn(
           'overflow-hidden transition-all duration-300 ease-in-out',
-          isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+          isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
         )}
       >
         <div className="px-4 py-3 bg-sgc-blue-700/5 space-y-4">
@@ -132,11 +102,13 @@ function StructuredResponse({ content }: { content: string }) {
   }
 
   // Структурированный ответ — показываем в визуальных блоках
+  // Объединяем все цитаты (из legalBasis парсинга и из quotes) в один массив
+  const allQuotes = [...parsed.quotes];
+
   return (
     <div>
       <SummaryBlock text={parsed.summary} />
-      <DocumentReferencesBlock items={parsed.legalBasis} />
-      <CollapsibleQuotesBlock quotes={parsed.quotes} />
+      <CollapsibleDocumentsBlock quotes={allQuotes} />
     </div>
   );
 }

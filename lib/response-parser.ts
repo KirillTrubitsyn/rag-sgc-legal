@@ -38,7 +38,9 @@ export function parseAssistantResponse(text: string): ParsedResponse {
 
   // Регулярки для поиска секций (поддерживаем ## и # и просто текст)
   const summaryRegex = /(?:^|\n)##?\s*(?:Ответ|ОТВЕТ|Ответ по существу|ОТВЕТ ПО СУЩЕСТВУ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
+  // Объединённый раздел "Ссылки на документы" теперь содержит и цитаты
   const legalBasisRegex = /(?:^|\n)##?\s*(?:Ссылки на документы|ССЫЛКИ НА ДОКУМЕНТЫ|Правовое обоснование|ПРАВОВОЕ ОБОСНОВАНИЕ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
+  // Старый раздел цитат для обратной совместимости
   const quotesRegex = /(?:^|\n)##?\s*(?:Цитаты|ЦИТАТЫ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
 
   // Извлекаем секцию "Ответ"
@@ -47,18 +49,39 @@ export function parseAssistantResponse(text: string): ParsedResponse {
     result.summary = summaryMatch[1].trim();
   }
 
-  // Извлекаем секцию "Правовое обоснование"
+  // Извлекаем секцию "Ссылки на документы" (может содержать цитаты или список)
   const legalMatch = text.match(legalBasisRegex);
   if (legalMatch) {
     const legalText = legalMatch[1].trim();
-    result.legalBasis = parseLegalBasis(legalText);
+    // Пробуем парсить как blockquote цитаты
+    const blockquoteQuotes = parseBlockquotes(legalText);
+    if (blockquoteQuotes.length > 0) {
+      result.quotes = blockquoteQuotes;
+    } else {
+      // Если нет blockquote — парсим как список и конвертируем в quotes
+      const listItems = parseLegalBasis(legalText);
+      // Дедупликация: объединяем описания с одинаковым source
+      const groupedBySource = new Map<string, string[]>();
+      for (const item of listItems) {
+        const source = `${item.norm}, ${item.document}`.replace(/, $/, '');
+        if (!groupedBySource.has(source)) {
+          groupedBySource.set(source, []);
+        }
+        groupedBySource.get(source)!.push(item.description);
+      }
+      result.quotes = Array.from(groupedBySource.entries()).map(([source, descriptions]) => ({
+        text: descriptions.join('; '),
+        source
+      }));
+    }
   }
 
-  // Извлекаем секцию "Цитаты"
+  // Старый раздел "Цитаты" для обратной совместимости
   const quotesMatch = text.match(quotesRegex);
   if (quotesMatch) {
     const quotesText = quotesMatch[1].trim();
-    result.quotes = parseQuotes(quotesText);
+    const additionalQuotes = parseBlockquotes(quotesText);
+    result.quotes = [...result.quotes, ...additionalQuotes];
   }
 
   // Fallback: если ни один маркер не найден — весь текст в summary
@@ -120,11 +143,11 @@ function parseLegalBasis(text: string): LegalBasisItem[] {
 }
 
 /**
- * Парсит цитаты из текста
+ * Парсит цитаты в формате blockquote
  * Формат: > «текст цитаты»
  *         > — Источник: документ, пункт
  */
-function parseQuotes(text: string): QuoteItem[] {
+function parseBlockquotes(text: string): QuoteItem[] {
   const items: QuoteItem[] = [];
   const lines = text.split('\n');
 
