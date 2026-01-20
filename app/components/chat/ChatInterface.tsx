@@ -2,15 +2,65 @@
 
 import { useState } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Scale, Quote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
+import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
+
+// Компонент для отображения блока "Ответ по существу"
+function SummaryBlock({ text }: { text: string }) {
+  if (!text) return null;
+
+  return (
+    <div className="mb-4">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="my-2 text-sgc-blue-500">{children}</p>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// Компонент для отображения блока "Правовое обоснование"
+function LegalBasisBlock({ items }: { items: ParsedResponse['legalBasis'] }) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="mt-4 rounded-lg border border-sgc-blue-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2 bg-sgc-blue-50 border-b border-sgc-blue-200">
+        <Scale className="w-4 h-4 text-sgc-blue-600" />
+        <span className="font-medium text-sgc-blue-700 text-sm">Правовое обоснование</span>
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        {items.map((item, idx) => (
+          <div key={idx} className="flex gap-2 text-sm">
+            <span className="font-semibold text-sgc-orange-600 whitespace-nowrap">{item.norm}</span>
+            {item.document && (
+              <span className="text-sgc-blue-400">({item.document})</span>
+            )}
+            {item.description && (
+              <>
+                <span className="text-sgc-blue-300">—</span>
+                <span className="text-sgc-blue-600">{item.description}</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Компонент сворачиваемого блока цитат
-function CollapsibleQuotes({ quotes }: { quotes: string }) {
+function CollapsibleQuotesBlock({ quotes }: { quotes: QuoteItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  if (!quotes.trim()) return null;
+  if (!quotes || quotes.length === 0) return null;
 
   return (
     <div className="mt-4 rounded-lg overflow-hidden border border-sgc-blue-700/20">
@@ -18,7 +68,10 @@ function CollapsibleQuotes({ quotes }: { quotes: string }) {
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between px-4 py-3 bg-sgc-blue-700/10 hover:bg-sgc-blue-700/15 transition-colors text-left"
       >
-        <span className="font-medium text-sgc-blue-700">Подробные цитаты</span>
+        <div className="flex items-center gap-2">
+          <Quote className="w-4 h-4 text-sgc-blue-700" />
+          <span className="font-medium text-sgc-blue-700">Подробные цитаты ({quotes.length})</span>
+        </div>
         {isOpen ? (
           <ChevronUp className="w-5 h-5 text-sgc-blue-700" />
         ) : (
@@ -31,71 +84,61 @@ function CollapsibleQuotes({ quotes }: { quotes: string }) {
           isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
         )}
       >
-        <div className="px-4 py-3 bg-sgc-blue-700/5">
-          <div className="prose prose-sm max-w-none text-sgc-blue-500/90">
-            <ReactMarkdown
-              components={{
-                blockquote: ({ children }) => (
-                  <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
-                    {children}
-                  </blockquote>
-                ),
-                p: ({ children }) => <p className="my-2">{children}</p>,
-                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                em: ({ children }) => <em className="italic">{children}</em>,
-              }}
-            >
-              {quotes}
-            </ReactMarkdown>
-          </div>
+        <div className="px-4 py-3 bg-sgc-blue-700/5 space-y-4">
+          {quotes.map((quote, idx) => (
+            <div key={idx} className="border-l-4 border-sgc-orange-500/50 pl-3">
+              <p className="italic text-sgc-blue-500/90">«{quote.text}»</p>
+              {quote.source && (
+                <p className="text-xs text-sgc-blue-400 mt-1">— {quote.source}</p>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-// Функция для разделения контента на основной текст и цитаты
-function parseContentWithQuotes(content: string): { mainContent: string; quotes: string } {
-  const lines = content.split('\n');
-  const mainLines: string[] = [];
-  const quoteLines: string[] = [];
+// Компонент структурированного ответа
+function StructuredResponse({ content }: { content: string }) {
+  const parsed = parseAssistantResponse(content);
+  const isStructured = hasStructuredFormat(content);
 
-  let inQuotesSection = false;
-  let foundQuotesHeader = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmedLine = line.trim();
-
-    // Проверяем заголовок раздела цитат
-    if (trimmedLine.match(/^##?\s*Цитаты/i)) {
-      inQuotesSection = true;
-      foundQuotesHeader = true;
-      quoteLines.push(line);
-      continue;
-    }
-
-    // Если нашли новый заголовок раздела — выходим из режима цитат
-    if (inQuotesSection && trimmedLine.match(/^##?\s+/) && !trimmedLine.match(/^##?\s*Цитаты/i)) {
-      inQuotesSection = false;
-    }
-
-    if (inQuotesSection) {
-      quoteLines.push(line);
-    } else {
-      // Проверяем отдельные блоки цитат (строки начинающиеся с >) вне раздела цитат
-      if (trimmedLine.startsWith('>') && trimmedLine.includes('«')) {
-        quoteLines.push(line);
-      } else {
-        mainLines.push(line);
-      }
-    }
+  // Если ответ не структурирован — показываем как обычный markdown
+  if (!isStructured) {
+    return (
+      <ReactMarkdown
+        components={{
+          h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
+          p: ({ children }) => <p className="my-2">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="ml-2">{children}</li>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
   }
 
-  return {
-    mainContent: mainLines.join('\n').trim(),
-    quotes: quoteLines.join('\n').trim()
-  };
+  // Структурированный ответ — показываем в визуальных блоках
+  return (
+    <div>
+      <SummaryBlock text={parsed.summary} />
+      <LegalBasisBlock items={parsed.legalBasis} />
+      <CollapsibleQuotesBlock quotes={parsed.quotes} />
+    </div>
+  );
 }
 
 export default function ChatInterface() {
@@ -199,35 +242,7 @@ export default function ChatInterface() {
                     {message.role === 'user' ? (
                       <span className="whitespace-pre-wrap">{message.content}</span>
                     ) : (
-                      (() => {
-                        const { mainContent, quotes } = parseContentWithQuotes(message.content);
-                        return (
-                          <>
-                            <ReactMarkdown
-                              components={{
-                                h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
-                                h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
-                                h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
-                                p: ({ children }) => <p className="my-2">{children}</p>,
-                                ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
-                                ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
-                                li: ({ children }) => <li className="ml-2">{children}</li>,
-                                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                                em: ({ children }) => <em className="italic">{children}</em>,
-                                code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
-                                blockquote: ({ children }) => (
-                                  <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
-                                    {children}
-                                  </blockquote>
-                                ),
-                              }}
-                            >
-                              {mainContent}
-                            </ReactMarkdown>
-                            <CollapsibleQuotes quotes={quotes} />
-                          </>
-                        );
-                      })()
+                      <StructuredResponse content={message.content} />
                     )}
                   </div>
 
