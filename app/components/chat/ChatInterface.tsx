@@ -1,9 +1,145 @@
 'use client';
 
+import { useState } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Quote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
+import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
+
+// Компонент для отображения блока "Ответ по существу"
+function SummaryBlock({ text }: { text: string }) {
+  if (!text) return null;
+
+  return (
+    <div className="mb-4">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="my-2 text-sgc-blue-500">{children}</p>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// Компонент для отображения блока "Ссылки на документы"
+function DocumentReferencesBlock({ items }: { items: ParsedResponse['legalBasis'] }) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="mt-4 rounded-lg border border-sgc-blue-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2 bg-sgc-blue-50 border-b border-sgc-blue-200">
+        <Link2 className="w-4 h-4 text-sgc-blue-600" />
+        <span className="font-medium text-sgc-blue-700 text-sm">Ссылки на документы</span>
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        {items.map((item, idx) => (
+          <div key={idx} className="flex gap-2 text-sm">
+            <span className="font-semibold text-sgc-orange-600 whitespace-nowrap">{item.norm}</span>
+            {item.document && (
+              <span className="text-sgc-blue-400">({item.document})</span>
+            )}
+            {item.description && (
+              <>
+                <span className="text-sgc-blue-300">—</span>
+                <span className="text-sgc-blue-600">{item.description}</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Компонент сворачиваемого блока цитат
+function CollapsibleQuotesBlock({ quotes }: { quotes: QuoteItem[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!quotes || quotes.length === 0) return null;
+
+  return (
+    <div className="mt-4 rounded-lg overflow-hidden border border-sgc-blue-700/20">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-sgc-blue-700/10 hover:bg-sgc-blue-700/15 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Quote className="w-4 h-4 text-sgc-blue-700" />
+          <span className="font-medium text-sgc-blue-700">Подробные цитаты ({quotes.length})</span>
+        </div>
+        {isOpen ? (
+          <ChevronUp className="w-5 h-5 text-sgc-blue-700" />
+        ) : (
+          <ChevronDown className="w-5 h-5 text-sgc-blue-700" />
+        )}
+      </button>
+      <div
+        className={cn(
+          'overflow-hidden transition-all duration-300 ease-in-out',
+          isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+        )}
+      >
+        <div className="px-4 py-3 bg-sgc-blue-700/5 space-y-4">
+          {quotes.map((quote, idx) => (
+            <div key={idx} className="border-l-4 border-sgc-orange-500/50 pl-3">
+              <p className="italic text-sgc-blue-500/90">«{quote.text}»</p>
+              {quote.source && (
+                <p className="text-xs text-sgc-blue-400 mt-1">— {quote.source}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Компонент структурированного ответа
+function StructuredResponse({ content }: { content: string }) {
+  const parsed = parseAssistantResponse(content);
+  const isStructured = hasStructuredFormat(content);
+
+  // Если ответ не структурирован — показываем как обычный markdown
+  if (!isStructured) {
+    return (
+      <ReactMarkdown
+        components={{
+          h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
+          p: ({ children }) => <p className="my-2">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="ml-2">{children}</li>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
+  }
+
+  // Структурированный ответ — показываем в визуальных блоках
+  return (
+    <div>
+      <SummaryBlock text={parsed.summary} />
+      <DocumentReferencesBlock items={parsed.legalBasis} />
+      <CollapsibleQuotesBlock quotes={parsed.quotes} />
+    </div>
+  );
+}
 
 export default function ChatInterface() {
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
@@ -106,27 +242,7 @@ export default function ChatInterface() {
                     {message.role === 'user' ? (
                       <span className="whitespace-pre-wrap">{message.content}</span>
                     ) : (
-                      <ReactMarkdown
-                        components={{
-                          h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
-                          p: ({ children }) => <p className="my-2">{children}</p>,
-                          ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
-                          li: ({ children }) => <li className="ml-2">{children}</li>,
-                          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                          em: ({ children }) => <em className="italic">{children}</em>,
-                          code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
-                          blockquote: ({ children }) => (
-                            <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
-                              {children}
-                            </blockquote>
-                          ),
-                        }}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
+                      <StructuredResponse content={message.content} />
                     )}
                   </div>
 
