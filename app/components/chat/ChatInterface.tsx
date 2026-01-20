@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2 } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
+import { exportToDocx } from '@/lib/docx-generator';
 
 // Компонент для отображения блока "Ответ по существу"
 function SummaryBlock({ text }: { text: string }) {
@@ -117,10 +118,39 @@ export default function ChatInterface() {
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
     api: '/api/chat',
   });
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const handleNewQuery = () => {
     setMessages([]);
     setInput('');
+  };
+
+  // Функция для получения вопроса пользователя для данного ответа ассистента
+  const getQuestionForAssistant = (messageIndex: number): string => {
+    // Ищем последнее сообщение пользователя перед этим ответом
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        return messages[i].content;
+      }
+    }
+    return '';
+  };
+
+  // Функция экспорта в DOCX
+  const handleExportDocx = async (messageId: string, messageIndex: number, content: string) => {
+    setDownloadingId(messageId);
+    try {
+      const question = getQuestionForAssistant(messageIndex);
+      await exportToDocx({
+        question,
+        answer: content,
+      });
+    } catch (error) {
+      console.error('Ошибка экспорта:', error);
+      alert('Не удалось экспортировать документ');
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   return (
@@ -193,7 +223,7 @@ export default function ChatInterface() {
             </div>
           ) : (
             // Messages
-            messages.map((message) => (
+            messages.map((message, messageIndex) => (
               <div
                 key={message.id}
                 className={cn(
@@ -217,6 +247,24 @@ export default function ChatInterface() {
                       <StructuredResponse content={message.content} />
                     )}
                   </div>
+
+                  {/* Export Button for Assistant Messages */}
+                  {message.role === 'assistant' && message.content && !isLoading && (
+                    <div className="mt-3 pt-3 border-t border-sgc-blue-700/10">
+                      <button
+                        onClick={() => handleExportDocx(message.id, messageIndex, message.content)}
+                        disabled={downloadingId === message.id}
+                        className={cn(
+                          'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
+                          'bg-sgc-orange-500/10 text-sgc-orange-600 hover:bg-sgc-orange-500/20',
+                          'disabled:opacity-50 disabled:cursor-not-allowed'
+                        )}
+                      >
+                        <Download className="w-4 h-4" />
+                        {downloadingId === message.id ? 'Загрузка...' : 'Скачать .docx'}
+                      </button>
+                    </div>
+                  )}
 
                   {/* Tool Invocations - Search Results */}
                   {message.toolInvocations && message.toolInvocations.length > 0 && (

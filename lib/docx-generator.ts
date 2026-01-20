@@ -1,0 +1,516 @@
+/**
+ * DOCX generator service for exporting AI responses
+ * Стиль: Правовое заключение (корпоративный юридический документ)
+ */
+import {
+  Document,
+  Paragraph,
+  TextRun,
+  AlignmentType,
+  Footer,
+  PageNumber,
+  convertInchesToTwip,
+  HeadingLevel,
+  BorderStyle,
+} from 'docx';
+import { saveAs } from 'file-saver';
+import { Packer } from 'docx';
+
+// Константы для форматирования
+const FONT_NAME = 'Times New Roman';
+const FONT_SIZE_NORMAL = 22; // В half-points (11pt * 2)
+const FONT_SIZE_TITLE = 28; // 14pt
+const FONT_SIZE_HEADING = 24; // 12pt
+const FONT_SIZE_SMALL = 18; // 9pt
+const FONT_SIZE_FOOTER = 16; // 8pt
+
+// Отступы в twips (1 inch = 1440 twips)
+const MARGIN_LEFT = convertInchesToTwip(1.18); // ~3cm
+const MARGIN_RIGHT = convertInchesToTwip(0.79); // ~2cm
+const MARGIN_TOP = convertInchesToTwip(0.59); // ~1.5cm
+const MARGIN_BOTTOM = convertInchesToTwip(0.59); // ~1.5cm
+const FIRST_LINE_INDENT = convertInchesToTwip(0.49); // ~1.25cm
+
+interface ExportOptions {
+  question: string;
+  answer: string;
+  title?: string;
+  createdAt?: Date;
+}
+
+/**
+ * Очищает текст от дублирующихся заголовков и форматирования
+ */
+function cleanTextForDocx(text: string): string {
+  // Убираем заголовок "ПРАВОВОЕ ЗАКЛЮЧЕНИЕ"
+  text = text.replace(/^[\s]*ПРАВОВОЕ ЗАКЛЮЧЕНИЕ[^\n]*\n?/gmi, '');
+  text = text.replace(/^[\s]*АНАЛИТИЧЕСКАЯ СПРАВКА[:\s]*/gmi, '');
+
+  // Убираем подписи
+  text = text.replace(/^Председатель\s+(юридического\s+)?консилиума.*$/gmi, '');
+  text = text.replace(/^Дата составления заключения.*$/gmi, '');
+
+  // Убираем разделители
+  text = text.replace(/^---+\s*$/gm, '');
+
+  // Убираем markdown bold маркеры
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+
+  // Убираем лишние переносы
+  text = text.replace(/\n{3,}/g, '\n\n');
+
+  return text.trim();
+}
+
+/**
+ * Извлекает источники [N] из текста
+ */
+function extractSources(text: string): { cleanText: string; sources: string[] } {
+  const sources: string[] = [];
+  const sourcePattern = /\[(\d+)\]/g;
+
+  // Находим уникальные номера источников
+  const foundNumbers = new Set<string>();
+  let match;
+  while ((match = sourcePattern.exec(text)) !== null) {
+    foundNumbers.add(match[1]);
+  }
+
+  // Убираем [N] из текста
+  const cleanText = text
+    .replace(/\s*\[\d+\](?:\[\d+\])*/g, '')
+    .replace(/  +/g, ' ');
+
+  // Генерируем placeholder для источников
+  const sortedNumbers = Array.from(foundNumbers).sort((a, b) => parseInt(a) - parseInt(b));
+  for (const num of sortedNumbers) {
+    sources.push(`[${num}] Источник из результатов поиска`);
+  }
+
+  return { cleanText, sources };
+}
+
+/**
+ * Парсит текст и создаёт массив параграфов
+ */
+function parseTextToParagraphs(text: string): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
+  const lines = text.split('\n');
+  let currentParagraphText = '';
+
+  for (const line of lines) {
+    const stripped = line.trim();
+
+    if (!stripped) {
+      // Пустая строка - завершаем текущий параграф
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      continue;
+    }
+
+    // Секционные заголовки с буквами (A., B., C.)
+    const letterSectionMatch = stripped.match(/^([A-ZА-Я])\.\s+(.*)$/);
+    if (letterSectionMatch && stripped.length < 100) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createHeadingParagraph(stripped, true));
+      continue;
+    }
+
+    // Нумерованные заголовки (1., 1.1., 2.)
+    const sectionMatch = stripped.match(/^(\d+(?:\.\d+)?)\.\s+([А-ЯA-Z].*)$/);
+    if (sectionMatch && stripped.length < 100) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      const isSubsection = sectionMatch[1].includes('.');
+      paragraphs.push(createHeadingParagraph(stripped, !isSubsection));
+      continue;
+    }
+
+    // Markdown заголовки (##, ###, ####)
+    if (stripped.startsWith('#### ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createHeadingParagraph(stripped.slice(5), false));
+      continue;
+    }
+    if (stripped.startsWith('### ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createHeadingParagraph(stripped.slice(4), false));
+      continue;
+    }
+    if (stripped.startsWith('## ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createHeadingParagraph(stripped.slice(3), true));
+      continue;
+    }
+    if (stripped.startsWith('# ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createHeadingParagraph(stripped.slice(2), true));
+      continue;
+    }
+
+    // Маркированные списки
+    if (stripped.startsWith('- ') || stripped.startsWith('• ') || stripped.startsWith('* ')) {
+      if (currentParagraphText) {
+        paragraphs.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+      paragraphs.push(createBulletParagraph(stripped.slice(2)));
+      continue;
+    }
+
+    // Подзаголовки (короткие строки с заглавной буквы без точки в конце)
+    if (
+      stripped.length < 60 &&
+      stripped[0].toUpperCase() === stripped[0] &&
+      !stripped.endsWith('.') &&
+      !stripped.endsWith(':') &&
+      !stripped.match(/^\d/) &&
+      !stripped.startsWith('-') &&
+      !stripped.startsWith('•')
+    ) {
+      const words = stripped.split(' ');
+      if (words.length <= 6 && words.slice(0, -1).every(w => !w.endsWith(','))) {
+        if (currentParagraphText) {
+          paragraphs.push(createBodyParagraph(currentParagraphText));
+          currentParagraphText = '';
+        }
+        paragraphs.push(createHeadingParagraph(stripped, false));
+        continue;
+      }
+    }
+
+    // Обычный текст
+    if (currentParagraphText) {
+      currentParagraphText += ' ' + stripped;
+    } else {
+      currentParagraphText = stripped;
+    }
+  }
+
+  // Добавляем последний параграф
+  if (currentParagraphText) {
+    paragraphs.push(createBodyParagraph(currentParagraphText));
+  }
+
+  return paragraphs;
+}
+
+/**
+ * Создаёт параграф заголовка
+ */
+function createHeadingParagraph(text: string, isMain: boolean): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: text,
+        bold: true,
+        font: FONT_NAME,
+        size: isMain ? FONT_SIZE_HEADING : FONT_SIZE_NORMAL,
+      }),
+    ],
+    spacing: {
+      before: isMain ? 200 : 120,
+      after: isMain ? 80 : 40,
+    },
+  });
+}
+
+/**
+ * Создаёт параграф основного текста
+ */
+function createBodyParagraph(text: string): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: text,
+        font: FONT_NAME,
+        size: FONT_SIZE_NORMAL,
+      }),
+    ],
+    alignment: AlignmentType.JUSTIFIED,
+    indent: {
+      firstLine: FIRST_LINE_INDENT,
+    },
+    spacing: {
+      after: 120,
+      line: 276, // 1.15 line spacing
+    },
+  });
+}
+
+/**
+ * Создаёт параграф маркированного списка
+ */
+function createBulletParagraph(text: string): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: '• ' + text,
+        font: FONT_NAME,
+        size: FONT_SIZE_NORMAL,
+      }),
+    ],
+    alignment: AlignmentType.JUSTIFIED,
+    indent: {
+      left: convertInchesToTwip(0.28), // ~0.7cm
+    },
+    spacing: {
+      before: 20,
+      after: 20,
+    },
+  });
+}
+
+/**
+ * Создаёт секцию с источниками
+ */
+function createSourcesSection(sources: string[]): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
+
+  // Пустая строка перед секцией
+  paragraphs.push(new Paragraph({ children: [] }));
+
+  // Заголовок "Источники"
+  paragraphs.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: 'Источники',
+          bold: true,
+          font: FONT_NAME,
+          size: FONT_SIZE_NORMAL,
+        }),
+      ],
+      spacing: {
+        before: 160,
+        after: 80,
+      },
+    })
+  );
+
+  // Список источников
+  for (const source of sources) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: source,
+            font: FONT_NAME,
+            size: FONT_SIZE_SMALL,
+            italics: true,
+          }),
+        ],
+        indent: {
+          left: convertInchesToTwip(0.2),
+        },
+        spacing: {
+          before: 20,
+          after: 20,
+        },
+      })
+    );
+  }
+
+  return paragraphs;
+}
+
+/**
+ * Создаёт футер документа
+ */
+function createDocumentFooter(createdAt?: Date): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
+
+  // Пустая строка
+  paragraphs.push(new Paragraph({ children: [] }));
+
+  // Разделитель
+  paragraphs.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: '─'.repeat(50),
+          font: FONT_NAME,
+          size: FONT_SIZE_FOOTER,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: {
+        before: 80,
+        after: 80,
+      },
+    })
+  );
+
+  // Дата
+  const dateStr = (createdAt || new Date()).toLocaleDateString('ru-RU');
+  paragraphs.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Дата: ${dateStr}`,
+          font: FONT_NAME,
+          size: FONT_SIZE_SMALL,
+        }),
+      ],
+      alignment: AlignmentType.RIGHT,
+      spacing: {
+        after: 40,
+      },
+    })
+  );
+
+  return paragraphs;
+}
+
+/**
+ * Создаёт и экспортирует документ DOCX
+ */
+export async function exportToDocx(options: ExportOptions): Promise<void> {
+  const { question, answer, title, createdAt } = options;
+
+  // Очищаем текст
+  const cleanAnswer = cleanTextForDocx(answer);
+
+  // Извлекаем источники
+  const { cleanText, sources } = extractSources(cleanAnswer);
+
+  // Создаём параграфы для заголовка
+  const titleParagraphs: Paragraph[] = [
+    // Заголовок документа
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: title || 'ПРАВОВОЕ ЗАКЛЮЧЕНИЕ',
+          bold: true,
+          font: FONT_NAME,
+          size: FONT_SIZE_TITLE,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: {
+        before: 0,
+        after: 160,
+      },
+    }),
+  ];
+
+  // Добавляем вопрос, если он есть
+  if (question) {
+    titleParagraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: 'Вопрос: ',
+            bold: true,
+            font: FONT_NAME,
+            size: FONT_SIZE_NORMAL,
+          }),
+          new TextRun({
+            text: question,
+            font: FONT_NAME,
+            size: FONT_SIZE_NORMAL,
+          }),
+        ],
+        spacing: {
+          after: 200,
+        },
+      })
+    );
+  }
+
+  // Парсим основной текст
+  const contentParagraphs = parseTextToParagraphs(cleanText);
+
+  // Создаём секцию источников (если есть)
+  const sourcesParagraphs = sources.length > 0 ? createSourcesSection(sources) : [];
+
+  // Создаём футер документа
+  const footerParagraphs = createDocumentFooter(createdAt);
+
+  // Собираем все параграфы
+  const allParagraphs = [
+    ...titleParagraphs,
+    ...contentParagraphs,
+    ...sourcesParagraphs,
+    ...footerParagraphs,
+  ];
+
+  // Создаём документ
+  const doc = new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: MARGIN_TOP,
+              right: MARGIN_RIGHT,
+              bottom: MARGIN_BOTTOM,
+              left: MARGIN_LEFT,
+            },
+          },
+        },
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: 'Документ подготовлен SGC Legal Search',
+                    font: FONT_NAME,
+                    size: FONT_SIZE_FOOTER,
+                    italics: true,
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              }),
+            ],
+          }),
+        },
+        children: allParagraphs,
+      },
+    ],
+  });
+
+  // Генерируем файл
+  const blob = await Packer.toBlob(doc);
+
+  // Формируем имя файла
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const filename = `sgc-legal-${timestamp}.docx`;
+
+  // Скачиваем файл
+  saveAs(blob, filename);
+}
+
+/**
+ * Хелпер для скачивания blob (альтернативный метод)
+ */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
