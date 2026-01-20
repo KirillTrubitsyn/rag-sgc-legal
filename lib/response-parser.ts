@@ -38,7 +38,9 @@ export function parseAssistantResponse(text: string): ParsedResponse {
 
   // Регулярки для поиска секций (поддерживаем ## и # и просто текст)
   const summaryRegex = /(?:^|\n)##?\s*(?:Ответ|ОТВЕТ|Ответ по существу|ОТВЕТ ПО СУЩЕСТВУ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
+  // Объединённый раздел "Ссылки на документы" теперь содержит и цитаты
   const legalBasisRegex = /(?:^|\n)##?\s*(?:Ссылки на документы|ССЫЛКИ НА ДОКУМЕНТЫ|Правовое обоснование|ПРАВОВОЕ ОБОСНОВАНИЕ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
+  // Старый раздел цитат для обратной совместимости
   const quotesRegex = /(?:^|\n)##?\s*(?:Цитаты|ЦИТАТЫ)\s*\n([\s\S]*?)(?=\n##?\s|$)/i;
 
   // Извлекаем секцию "Ответ"
@@ -47,18 +49,20 @@ export function parseAssistantResponse(text: string): ParsedResponse {
     result.summary = summaryMatch[1].trim();
   }
 
-  // Извлекаем секцию "Правовое обоснование"
+  // Извлекаем секцию "Ссылки на документы" (теперь содержит цитаты)
   const legalMatch = text.match(legalBasisRegex);
   if (legalMatch) {
     const legalText = legalMatch[1].trim();
-    result.legalBasis = parseLegalBasis(legalText);
+    // Теперь раздел "Ссылки на документы" содержит цитаты в формате blockquote
+    result.quotes = parseQuotes(legalText);
   }
 
-  // Извлекаем секцию "Цитаты"
+  // Старый раздел "Цитаты" для обратной совместимости
   const quotesMatch = text.match(quotesRegex);
   if (quotesMatch) {
     const quotesText = quotesMatch[1].trim();
-    result.quotes = parseQuotes(quotesText);
+    const additionalQuotes = parseQuotes(quotesText);
+    result.quotes = [...result.quotes, ...additionalQuotes];
   }
 
   // Fallback: если ни один маркер не найден — весь текст в summary
