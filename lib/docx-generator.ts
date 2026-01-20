@@ -42,8 +42,9 @@ interface ExportOptions {
  * Очищает текст от дублирующихся заголовков и форматирования
  */
 function cleanTextForDocx(text: string): string {
-  // Убираем заголовок "ПРАВОВОЕ ЗАКЛЮЧЕНИЕ"
+  // Убираем стандартные заголовки из текста (они добавляются отдельно)
   text = text.replace(/^[\s]*ПРАВОВОЕ ЗАКЛЮЧЕНИЕ[^\n]*\n?/gmi, '');
+  text = text.replace(/^[\s]*РЕЗУЛЬТАТЫ ПОИСКА[^\n]*\n?/gmi, '');
   text = text.replace(/^[\s]*АНАЛИТИЧЕСКАЯ СПРАВКА[:\s]*/gmi, '');
 
   // Убираем подписи
@@ -399,7 +400,7 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
     new Paragraph({
       children: [
         new TextRun({
-          text: title || 'ПРАВОВОЕ ЗАКЛЮЧЕНИЕ',
+          text: title || 'РЕЗУЛЬТАТЫ ПОИСКА',
           bold: true,
           font: FONT_NAME,
           size: FONT_SIZE_TITLE,
