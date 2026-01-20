@@ -49,19 +49,38 @@ export function parseAssistantResponse(text: string): ParsedResponse {
     result.summary = summaryMatch[1].trim();
   }
 
-  // Извлекаем секцию "Ссылки на документы" (теперь содержит цитаты)
+  // Извлекаем секцию "Ссылки на документы" (может содержать цитаты или список)
   const legalMatch = text.match(legalBasisRegex);
   if (legalMatch) {
     const legalText = legalMatch[1].trim();
-    // Теперь раздел "Ссылки на документы" содержит цитаты в формате blockquote
-    result.quotes = parseQuotes(legalText);
+    // Пробуем парсить как blockquote цитаты
+    const blockquoteQuotes = parseBlockquotes(legalText);
+    if (blockquoteQuotes.length > 0) {
+      result.quotes = blockquoteQuotes;
+    } else {
+      // Если нет blockquote — парсим как список и конвертируем в quotes
+      const listItems = parseLegalBasis(legalText);
+      // Дедупликация: объединяем описания с одинаковым source
+      const groupedBySource = new Map<string, string[]>();
+      for (const item of listItems) {
+        const source = `${item.norm}, ${item.document}`.replace(/, $/, '');
+        if (!groupedBySource.has(source)) {
+          groupedBySource.set(source, []);
+        }
+        groupedBySource.get(source)!.push(item.description);
+      }
+      result.quotes = Array.from(groupedBySource.entries()).map(([source, descriptions]) => ({
+        text: descriptions.join('; '),
+        source
+      }));
+    }
   }
 
   // Старый раздел "Цитаты" для обратной совместимости
   const quotesMatch = text.match(quotesRegex);
   if (quotesMatch) {
     const quotesText = quotesMatch[1].trim();
-    const additionalQuotes = parseQuotes(quotesText);
+    const additionalQuotes = parseBlockquotes(quotesText);
     result.quotes = [...result.quotes, ...additionalQuotes];
   }
 
@@ -124,11 +143,11 @@ function parseLegalBasis(text: string): LegalBasisItem[] {
 }
 
 /**
- * Парсит цитаты из текста
+ * Парсит цитаты в формате blockquote
  * Формат: > «текст цитаты»
  *         > — Источник: документ, пункт
  */
-function parseQuotes(text: string): QuoteItem[] {
+function parseBlockquotes(text: string): QuoteItem[] {
   const items: QuoteItem[] = [];
   const lines = text.split('\n');
 
