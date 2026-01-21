@@ -84,8 +84,9 @@ function CollapsibleDocumentsBlock({ quotes }: { quotes: QuoteItem[] }) {
                     <a
                       key={idx}
                       href={item.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-sgc-orange-500/10 text-sgc-orange-600 hover:bg-sgc-orange-500/20 transition-colors"
-                      download
                     >
                       <Download className="w-3.5 h-3.5" />
                       {item.source.length > 40 ? item.source.substring(0, 40) + '...' : item.source}
