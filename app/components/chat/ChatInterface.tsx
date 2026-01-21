@@ -242,7 +242,7 @@ export default function ChatInterface() {
                   {/* Message Content with Markdown */}
                   <div className="prose prose-sm max-w-none break-words leading-relaxed prose-headings:font-bold prose-headings:text-sgc-blue-500 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0">
                     {message.role === 'user' ? (
-                      <span className="whitespace-pre-wrap">{message.content}</span>
+                      <span className="whitespace-pre-wrap text-white">{message.content}</span>
                     ) : (
                       <StructuredResponse content={message.content} />
                     )}
