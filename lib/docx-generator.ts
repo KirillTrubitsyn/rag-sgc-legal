@@ -215,6 +215,11 @@ function parseTextToParagraphs(text: string): Paragraph[] {
         currentParagraphText = '';
       }
       paragraphs.push(createQuoteSourceParagraph(stripped));
+      // Добавляем пустой параграф БЕЗ линии для разрыва между блоками цитат
+      paragraphs.push(new Paragraph({
+        children: [],
+        spacing: { before: 100, after: 100 },
+      }));
       continue;
     }
 
@@ -391,7 +396,7 @@ function createQuoteSourceParagraph(text: string): Paragraph {
     },
     spacing: {
       before: 0,
-      after: 360, // Большой отступ после для разделения блоков цитат (линия прерывается)
+      after: 60,
     },
   });
 }
