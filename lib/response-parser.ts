@@ -12,6 +12,7 @@ export interface LegalBasisItem {
 export interface QuoteItem {
   text: string;   // Текст цитаты
   source: string; // Источник: документ, пункт
+  downloadUrl?: string; // URL для скачивания документа
 }
 
 export interface ParsedResponse {
@@ -202,11 +203,25 @@ function parseBlockquotes(text: string): QuoteItem[] {
     });
   }
 
-  // Очищаем кавычки из текста цитат
-  return items.map(item => ({
-    text: item.text.replace(/[«»"]/g, '').trim(),
-    source: item.source
-  }));
+  // Очищаем кавычки из текста цитат и извлекаем URL для скачивания
+  return items.map(item => {
+    let source = item.source;
+    let downloadUrl: string | undefined;
+
+    // Ищем markdown ссылку в source: [текст](/api/download?file_id=xxx&filename=yyy)
+    const linkMatch = source.match(/\[([^\]]+)\]\(([^)]+)\)/);
+    if (linkMatch) {
+      // Извлекаем URL и заменяем ссылку на текст
+      downloadUrl = linkMatch[2];
+      source = source.replace(linkMatch[0], linkMatch[1]);
+    }
+
+    return {
+      text: item.text.replace(/[«»"]/g, '').trim(),
+      source: source.trim(),
+      downloadUrl
+    };
+  });
 }
 
 /**

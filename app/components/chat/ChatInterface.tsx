@@ -64,6 +64,37 @@ function CollapsibleDocumentsBlock({ quotes }: { quotes: QuoteItem[] }) {
               )}
             </div>
           ))}
+
+          {/* Блок со ссылками на скачивание уникальных источников */}
+          {(() => {
+            const uniqueSources = new Map<string, { source: string; downloadUrl: string }>();
+            quotes.forEach(q => {
+              if (q.downloadUrl && !uniqueSources.has(q.downloadUrl)) {
+                uniqueSources.set(q.downloadUrl, { source: q.source, downloadUrl: q.downloadUrl });
+              }
+            });
+
+            if (uniqueSources.size === 0) return null;
+
+            return (
+              <div className="pt-3 mt-3 border-t border-sgc-blue-700/10">
+                <p className="text-xs text-sgc-blue-500 font-medium mb-2">Скачать источники:</p>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(uniqueSources.values()).map((item, idx) => (
+                    <a
+                      key={idx}
+                      href={item.downloadUrl}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-sgc-orange-500/10 text-sgc-orange-600 hover:bg-sgc-orange-500/20 transition-colors"
+                      download
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      {item.source.length > 40 ? item.source.substring(0, 40) + '...' : item.source}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
