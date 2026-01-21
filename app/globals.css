@@ -46,6 +46,7 @@ body {
 /* Primary button */
 .sgc-btn-primary {
   background: linear-gradient(135deg, var(--sgc-orange-500) 0%, var(--sgc-orange-600) 100%);
+  color: white;
   transition: all 0.2s ease;
 }
 
