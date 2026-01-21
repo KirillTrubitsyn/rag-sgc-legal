@@ -60,7 +60,19 @@ function CollapsibleDocumentsBlock({ quotes }: { quotes: QuoteItem[] }) {
             <div key={idx} className="border-l-4 border-sgc-orange-500/50 pl-3">
               <p className="italic text-sgc-blue-500/90">«{quote.text}»</p>
               {quote.source && (
-                <p className="text-xs text-sgc-blue-400 mt-1">— {quote.source}</p>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <p className="text-xs text-sgc-blue-400">— {quote.source}</p>
+                  {quote.downloadUrl && (
+                    <a
+                      href={quote.downloadUrl}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-sgc-orange-500/10 text-sgc-orange-600 hover:bg-sgc-orange-500/20 transition-colors"
+                      download
+                    >
+                      <Download className="w-3 h-3" />
+                      Скачать
+                    </a>
+                  )}
+                </div>
               )}
             </div>
           ))}
