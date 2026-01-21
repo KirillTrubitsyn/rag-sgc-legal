@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   const fileId = request.nextUrl.searchParams.get('file_id');
+  const filename = request.nextUrl.searchParams.get('filename') || 'document';
 
   if (!fileId) {
     return NextResponse.json({ error: 'file_id is required' }, { status: 400 });
@@ -14,53 +15,39 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Попробуем endpoint POST /v1/files:download
-    const downloadResponse = await fetch('https://api.x.ai/v1/files:download', {
-      method: 'POST',
+    // Скачиваем файл через GET /v1/files/{file_id}/content
+    const response = await fetch(`https://api.x.ai/v1/files/${fileId}/content`, {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ file_id: fileId }),
     });
 
-    if (!downloadResponse.ok) {
-      const errorData = await downloadResponse.json().catch(() => ({}));
-
-      // Если не работает, попробуем GET /v1/files/{file_id}
-      const fileInfoResponse = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-      });
-
-      const fileInfo = await fileInfoResponse.json();
-
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
       return NextResponse.json({
-        error: 'Download endpoint failed',
-        downloadError: errorData,
-        fileInfo: fileInfo,
-        suggestion: 'Check fileInfo for download_url or content field'
-      }, { status: 422 });
+        error: 'Failed to download file',
+        status: response.status,
+        details: errorData
+      }, { status: response.status });
     }
 
-    // Получаем содержимое файла
-    const contentType = downloadResponse.headers.get('content-type') || 'application/octet-stream';
-    const fileBuffer = await downloadResponse.arrayBuffer();
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const fileBuffer = await response.arrayBuffer();
 
-    // Определяем имя файла
-    const contentDisposition = downloadResponse.headers.get('content-disposition');
-    let filename = 'document';
-    if (contentDisposition) {
-      const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
-      if (match) filename = match[1];
-    }
+    // Определяем расширение файла
+    let ext = '';
+    if (contentType.includes('wordprocessingml')) ext = '.docx';
+    else if (contentType.includes('pdf')) ext = '.pdf';
+    else if (contentType.includes('spreadsheetml')) ext = '.xlsx';
+
+    const finalFilename = filename.includes('.') ? filename : `${filename}${ext}`;
 
     return new NextResponse(fileBuffer, {
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(finalFilename)}"`,
+        'Content-Length': String(fileBuffer.byteLength),
       },
     });
   } catch (error) {
