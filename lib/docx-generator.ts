@@ -203,8 +203,19 @@ function parseTextToParagraphs(text: string): Paragraph[] {
         paragraphs.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      const quoteText = stripped.replace(/^>\s*/, '');
-      paragraphs.push(createQuoteParagraph(quoteText));
+      const quoteContent = stripped.replace(/^>\s*/, '');
+
+      // Проверяем, является ли это строкой источника внутри blockquote
+      if (quoteContent.startsWith('—') || quoteContent.startsWith('― ') || quoteContent.startsWith('- ')) {
+        paragraphs.push(createQuoteSourceParagraph(quoteContent));
+        // Добавляем пустой параграф для разрыва между блоками цитат
+        paragraphs.push(new Paragraph({
+          children: [],
+          spacing: { before: 160, after: 160 },
+        }));
+      } else {
+        paragraphs.push(createQuoteParagraph(quoteContent));
+      }
       continue;
     }
 
@@ -218,7 +229,7 @@ function parseTextToParagraphs(text: string): Paragraph[] {
       // Добавляем пустой параграф БЕЗ линии для разрыва между блоками цитат
       paragraphs.push(new Paragraph({
         children: [],
-        spacing: { before: 100, after: 100 },
+        spacing: { before: 160, after: 160 },
       }));
       continue;
     }
