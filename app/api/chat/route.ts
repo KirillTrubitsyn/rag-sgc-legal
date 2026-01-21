@@ -82,6 +82,35 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция формирования поискового запроса с учетом контекста диалога
+function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): string {
+  // Получаем последние N сообщений пользователя для учета контекста
+  const userMessages = messages
+    .filter((m: any) => m.role === 'user')
+    .slice(-maxMessages);
+
+  if (userMessages.length === 0) {
+    return '';
+  }
+
+  // Если только одно сообщение - возвращаем его
+  if (userMessages.length === 1) {
+    return userMessages[0].content;
+  }
+
+  // Объединяем сообщения с указанием контекста
+  // Последнее сообщение имеет приоритет, предыдущие дают контекст
+  const contextMessages = userMessages.slice(0, -1).map((m: any) => m.content).join(' ');
+  const currentQuestion = userMessages[userMessages.length - 1].content;
+
+  // Формируем запрос: контекст + текущий вопрос (с большим весом на текущий)
+  const combinedQuery = `${currentQuestion} (контекст: ${contextMessages})`;
+
+  console.log('Contextual search query built from', userMessages.length, 'messages');
+
+  return combinedQuery;
+}
+
 export async function POST(req: Request) {
   console.log('=== Chat API called ===');
 
@@ -102,9 +131,8 @@ export async function POST(req: Request) {
 
     console.log('Using collection ID:', collectionId);
 
-    // Получаем последнее сообщение пользователя для поиска
-    const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-    const searchQuery = lastUserMessage?.content || '';
+    // Формируем поисковый запрос с учетом контекста предыдущих сообщений
+    const searchQuery = buildContextualSearchQuery(messages, 3);
 
     // Выполняем поиск по коллекции
     const searchResults = await searchCollection(searchQuery, apiKey, collectionId);
