@@ -340,7 +340,7 @@ function createQuoteParagraph(text: string): Paragraph {
     ],
     alignment: AlignmentType.JUSTIFIED,
     indent: {
-      left: convertInchesToTwip(0.2),
+      left: convertInchesToTwip(0.15),
     },
     border: {
       left: {
@@ -351,15 +351,15 @@ function createQuoteParagraph(text: string): Paragraph {
       },
     },
     spacing: {
-      before: 160,
-      after: 60,
+      before: 200,
+      after: 40,
       line: 276,
     },
   });
 }
 
 /**
- * Создаёт параграф источника цитаты (серый мелкий текст с тире)
+ * Создаёт параграф источника цитаты (серый текст с тире, без линии, без курсива)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
   // Убираем кавычки и тире если есть, добавляем своё тире
@@ -375,15 +375,15 @@ function createQuoteSourceParagraph(text: string): Paragraph {
         text: `— ${cleanSource}`,
         font: FONT_NAME,
         size: FONT_SIZE_SMALL,
-        color: '666666',
+        color: '888888', // Серый цвет
       }),
     ],
     indent: {
-      left: convertInchesToTwip(0.35),
+      left: convertInchesToTwip(0.15),
     },
     spacing: {
       before: 0,
-      after: 240,
+      after: 300, // Большой отступ после для разделения блоков цитат
     },
   });
 }
