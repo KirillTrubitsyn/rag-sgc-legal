@@ -1,13 +1,16 @@
 # xAI Grok API - Исследование Endpoints для Скачивания Документов
 
-## Результаты тестирования
+## Текущая конфигурация (Vercel)
 
-### Статус: Требуется валидный API ключ
+```env
+XAI_API_KEY=xai-tumX5RkNkrYLl...5X
+XAI_MANAGEMENT_API_KEY=xai-token-fNxHvkZHrCb3FVQ0Bg1xRh...62
+COLLECTION_ID=collection_c49af888-b405-4fc2-98fd-33b06b36cee8
+```
 
-Предоставленный `XAI_MANAGEMENT_API_KEY` не прошел валидацию:
-```
-{"code":"Client specified an invalid argument","error":"Incorrect API key provided: xa***62. You can obtain an API key from https://console.x.ai."}
-```
+### Примечание по тестированию
+Тестирование из sandbox-окружения ограничено (SSL/network issues).
+Рекомендуется тестировать локально или через Vercel deployment.
 
 ---
 
@@ -70,13 +73,19 @@
 ## Как скачать документ
 
 ### Шаг 1: Поиск документа
+
+**ВАЖНО:** Формат запроса требует `source` объект!
+
 ```bash
 curl -X POST "https://api.x.ai/v1/documents/search" \
   -H "Authorization: Bearer $XAI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "ваш поисковый запрос",
-    "collection_ids": ["'$COLLECTION_ID'"],
+    "source": {
+      "collection_ids": ["'"$COLLECTION_ID"'"]
+    },
+    "top_k": 10,
     "retrieval_mode": "hybrid"
   }'
 ```
@@ -135,33 +144,38 @@ collection (коллекция)
 
 ---
 
-## Что нужно сделать
+## Следующие шаги
 
-### 1. Получить валидный API ключ
-- Зайти на https://console.x.ai
-- Создать API Key (не Management Key!)
-- Убедиться что ключ имеет права на:
-  - Collections: read
-  - Files: read, download
-  - Documents: search
-
-### 2. Обновить .env.local
-```env
-XAI_API_KEY=xai-ваш-валидный-api-ключ
-COLLECTION_ID=ваш-collection-id
-XAI_BASE_URL=https://api.x.ai/v1
-```
-
-### 3. Протестировать
+### 1. Проверить ключи (локально или на Vercel)
 ```bash
-# Проверить ключ
+# Проверить API ключ
 curl -X GET "https://api.x.ai/v1/api-key" \
   -H "Authorization: Bearer $XAI_API_KEY"
 
-# Получить коллекции
+# Получить список коллекций
 curl -X GET "https://api.x.ai/v1/collections" \
   -H "Authorization: Bearer $XAI_API_KEY"
+
+# Поиск в коллекции
+curl -X POST "https://api.x.ai/v1/documents/search" \
+  -H "Authorization: Bearer $XAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "ГОСТ",
+    "source": {"collection_ids": ["collection_c49af888-b405-4fc2-98fd-33b06b36cee8"]},
+    "top_k": 3
+  }'
 ```
+
+### 2. Имплементировать в приложении
+После успешного тестирования - добавить endpoint `/api/download` который:
+1. Получает `file_id` из результатов поиска
+2. Вызывает `POST /v1/files:download`
+3. Возвращает файл пользователю
+
+### 3. Если нужен Management API
+Management API (`management-api.x.ai`) требует отдельный Management Key.
+Создать его можно в xAI Console → API Keys → Create Management Key.
 
 ---
 
