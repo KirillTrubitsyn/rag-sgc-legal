@@ -62,15 +62,17 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       console.log('First result fields:', JSON.stringify(results[0].fields || {}).substring(0, 500));
     }
 
-    // Форматируем результаты поиска
+    // Форматируем результаты поиска с file_id для скачивания
     const formattedResults = results.map((r: any, i: number) => {
       // Контент в chunk_content
       const content = r.chunk_content || r.content || r.text || '';
       // Название файла в fields
       const fileName = r.fields?.file_name || r.fields?.name || r.fields?.title || r.name || 'Документ';
       const score = r.score ? r.score.toFixed(3) : '';
+      // file_id для ссылки на скачивание
+      const fileId = r.file_id || '';
 
-      return `[${i + 1}] ${fileName} (релевантность: ${score}):\n${content}`;
+      return `[${i + 1}] ${fileName} (релевантность: ${score}, file_id: ${fileId}):\n${content}`;
     }).join('\n\n---\n\n');
 
     return formattedResults;
