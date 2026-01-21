@@ -359,7 +359,7 @@ function createQuoteParagraph(text: string): Paragraph {
 }
 
 /**
- * Создаёт параграф источника цитаты (серый текст с тире, без линии, без курсива)
+ * Создаёт параграф источника цитаты (серый текст с тире, С линией как у цитаты)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
   // Убираем кавычки и тире если есть, добавляем своё тире
@@ -381,9 +381,17 @@ function createQuoteSourceParagraph(text: string): Paragraph {
     indent: {
       left: convertInchesToTwip(0.15),
     },
+    border: {
+      left: {
+        color: 'E87722', // Оранжевый цвет SGC - та же линия что у цитаты
+        style: BorderStyle.SINGLE,
+        size: 18,
+        space: 8,
+      },
+    },
     spacing: {
       before: 0,
-      after: 300, // Большой отступ после для разделения блоков цитат
+      after: 360, // Большой отступ после для разделения блоков цитат (линия прерывается)
     },
   });
 }
