@@ -208,8 +208,8 @@ function parseTextToParagraphs(text: string): Paragraph[] {
       continue;
     }
 
-    // Источник цитаты (строки начинающиеся с "—" или "— ")
-    if (stripped.startsWith('—') || stripped.startsWith('― ')) {
+    // Источник цитаты (строки начинающиеся с "—", "― ", или "«—")
+    if (stripped.startsWith('—') || stripped.startsWith('― ') || stripped.startsWith('«—')) {
       if (currentParagraphText) {
         paragraphs.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
@@ -362,8 +362,12 @@ function createQuoteParagraph(text: string): Paragraph {
  * Создаёт параграф источника цитаты (серый мелкий текст с тире)
  */
 function createQuoteSourceParagraph(text: string): Paragraph {
-  // Убираем тире если есть и добавляем своё
-  const cleanSource = text.replace(/^[—―-]\s*/, '').trim();
+  // Убираем кавычки и тире если есть, добавляем своё тире
+  const cleanSource = text
+    .replace(/^[«"']\s*/, '') // Убираем открывающую кавычку
+    .replace(/[»"']$/, '')    // Убираем закрывающую кавычку
+    .replace(/^[—―-]\s*/, '') // Убираем тире
+    .trim();
 
   return new Paragraph({
     children: [
