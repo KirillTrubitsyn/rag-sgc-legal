@@ -405,6 +405,9 @@ export default function ChatInterface() {
             </button>
           </div>
         </form>
+        <p className="text-center text-xs text-sgc-blue-500/40 mt-2">
+          Разработка @Кирилл Трубицын
+        </p>
       </div>
     </div>
   );
