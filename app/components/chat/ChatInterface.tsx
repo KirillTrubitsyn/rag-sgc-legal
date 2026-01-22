@@ -216,12 +216,14 @@ export default function ChatInterface() {
               <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-sgc-orange-500/10 to-sgc-orange-500/5 flex items-center justify-center mb-6">
                 <FileText className="w-10 h-10 text-sgc-orange-500" />
               </div>
-              <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-3">
-                Юридическая служба СГК
+              <h2 className="text-2xl font-semibold text-sgc-blue-500 mb-1">
+                Юридическая служба
               </h2>
+              <h3 className="text-xl font-medium text-sgc-blue-500 mb-3">
+                Сибирской генерирующей компании
+              </h3>
               <p className="text-sgc-blue-500/60 max-w-md mb-2">
-                Система поиска по внутренним нормативным документам, стандартам и регламентам
-                Юридической службы СГК.
+                Система поиска по внутренним нормативным документам, стандартам и регламентам.
               </p>
               <p className="text-sgc-blue-500/50 text-sm max-w-md">
                 Задайте вопрос, и система найдёт релевантную информацию в базе документов.
