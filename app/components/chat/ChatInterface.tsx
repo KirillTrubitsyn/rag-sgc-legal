@@ -188,11 +188,11 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient - compact on mobile */}
-      <header className="bg-gradient-to-r from-[#152840] via-[#1e3a5f] to-[#2a4a6f] px-3 py-2 sm:px-6 sm:py-4 shadow-lg">
+      <header className="bg-gradient-to-r from-[#152840] via-[#1e3a5f] to-[#2a4a6f] px-3 py-[9px] sm:px-6 sm:py-2 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center min-w-0">
-            <div className="h-10 sm:h-14 flex items-center justify-center flex-shrink-0">
-              <img src="/sgc_search_horizontal_logo3.png" alt="SGC Legal Search" className="h-10 sm:h-14 object-contain" />
+            <div className="h-[46px] sm:h-[72px] flex items-center justify-center flex-shrink-0">
+              <img src="/sgc_search_horizontal_logo3.png" alt="SGC Legal Search" className="h-[46px] sm:h-[72px] object-contain" />
             </div>
           </div>
           {messages.length > 0 && (
