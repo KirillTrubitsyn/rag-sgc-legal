@@ -188,7 +188,7 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
       {/* Header with SGC Gradient - compact on mobile */}
-      <header className="bg-gradient-to-r from-[#1e3a5f] via-[#2a4a6f] to-[#1e3a5f] px-3 py-2 sm:px-6 sm:py-4 shadow-lg">
+      <header className="bg-gradient-to-r from-[#152840] via-[#1e3a5f] to-[#2a4a6f] px-3 py-2 sm:px-6 sm:py-4 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center min-w-0">
             <div className="h-10 sm:h-14 flex items-center justify-center flex-shrink-0">
@@ -230,9 +230,9 @@ export default function ChatInterface() {
               {/* Quick suggestions */}
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 {[
-                  'Порядок подготовки претензий',
-                  'Предъявление исков',
-                  'Регламент работы юристов',
+                  'Какой срок рассмотрения претензии контрагента?',
+                  'Как подготовить исковое заявление о взыскании задолженности?',
+                  'Порядок согласования договоров с контрагентами',
                 ].map((suggestion) => (
                   <button
                     key={suggestion}
