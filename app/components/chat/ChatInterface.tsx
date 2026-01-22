@@ -226,23 +226,6 @@ export default function ChatInterface() {
               <p className="text-sgc-blue-500/50 text-sm max-w-md">
                 Задайте вопрос, и система найдёт релевантную информацию в базе документов.
               </p>
-
-              {/* Quick suggestions */}
-              <div className="mt-8 flex flex-wrap justify-center gap-2">
-                {[
-                  'Какой срок рассмотрения претензии контрагента?',
-                  'Как подготовить исковое заявление о взыскании задолженности?',
-                  'Порядок согласования договоров с контрагентами',
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="px-4 py-2 rounded-full bg-sgc-orange-500 text-white text-sm hover:bg-sgc-orange-600 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
             </div>
           ) : (
             // Messages
