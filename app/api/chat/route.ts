@@ -143,6 +143,126 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция определения запрошенных полей таблицы из запроса пользователя
+function detectRequestedTableFields(query: string): {
+  fields: string[];
+  instruction: string;
+} {
+  const lowerQuery = query.toLowerCase();
+  const allFields = ['№', 'Файл', 'ФИО', 'Номер', 'Дата выдачи', 'Действует до', 'Скачать'];
+  const requestedFields: string[] = ['№']; // № всегда включаем
+
+  // Проверяем, какие поля запрошены
+  const fieldMappings: { keywords: string[]; field: string }[] = [
+    { keywords: ['фио', 'фамили', 'имя', 'имен', 'сотрудник', 'кто'], field: 'ФИО' },
+    { keywords: ['номер', 'номера', '№ довер'], field: 'Номер' },
+    { keywords: ['дат', 'выдач', 'выдан', 'когда выдан'], field: 'Дата выдачи' },
+    { keywords: ['срок', 'действ', 'до какого', 'истека', 'оконч', 'заканчива'], field: 'Действует до' },
+    { keywords: ['файл', 'документ', 'название'], field: 'Файл' },
+    { keywords: ['скача', 'ссылк', 'загруз', 'download'], field: 'Скачать' },
+  ];
+
+  let hasSpecificRequest = false;
+
+  for (const mapping of fieldMappings) {
+    if (mapping.keywords.some(kw => lowerQuery.includes(kw))) {
+      if (!requestedFields.includes(mapping.field)) {
+        requestedFields.push(mapping.field);
+      }
+      hasSpecificRequest = true;
+    }
+  }
+
+  // Если нет конкретных запросов или запрос общий — показываем все поля
+  if (!hasSpecificRequest || lowerQuery.includes('все поля') || lowerQuery.includes('полную таблицу') || lowerQuery.includes('всю информацию')) {
+    return {
+      fields: allFields,
+      instruction: 'Покажи ВСЕ доступные поля в таблице.'
+    };
+  }
+
+  // Всегда добавляем ссылку на скачивание
+  if (!requestedFields.includes('Скачать')) {
+    requestedFields.push('Скачать');
+  }
+
+  // Сортируем поля в правильном порядке
+  const orderedFields = allFields.filter(f => requestedFields.includes(f));
+
+  return {
+    fields: orderedFields,
+    instruction: `Пользователь запросил ТОЛЬКО следующие поля: ${orderedFields.join(', ')}. Покажи ТОЛЬКО эти колонки в таблице, НЕ добавляй другие.`
+  };
+}
+
+// Функция извлечения полей доверенности из названия файла
+// Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.) от 01.01.2024 до 31.12.2024.pdf"
+function extractPoaFieldsFromFilename(filename: string): {
+  fio: string;
+  poaNumber: string;
+  issueDate: string;
+  validUntil: string;
+} {
+  const result = {
+    fio: 'Не указано',
+    poaNumber: 'Не указано',
+    issueDate: 'Не указано',
+    validUntil: 'Не указано'
+  };
+
+  if (!filename || filename === 'Документ') {
+    return result;
+  }
+
+  // Извлекаем ФИО из скобок: (Мажирин О.Е.) или (Иванов Иван Иванович)
+  const fioInBrackets = filename.match(/\(([А-ЯЁа-яё][А-ЯЁа-яё\s.]+)\)/);
+  if (fioInBrackets && fioInBrackets[1]) {
+    result.fio = fioInBrackets[1].trim();
+  } else {
+    // Пробуем найти ФИО без скобок после номера: "КГ-24-127 Мажирин О.Е..pdf"
+    const fioAfterNumber = filename.match(/[А-ЯЁ]{2,}-\d{2,}-\d+\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.?)/);
+    if (fioAfterNumber && fioAfterNumber[1]) {
+      result.fio = fioAfterNumber[1].trim();
+    }
+  }
+
+  // Извлекаем номер доверенности
+  // Формат: КГ-24-127, ТГК-13-2024-001, СГК-24/123 и т.п.
+  const poaNumberMatch = filename.match(/([А-ЯЁ]{2,}-\d{2,}-\d+(?:[-\/]\d+)?)/i);
+  if (poaNumberMatch && poaNumberMatch[1]) {
+    result.poaNumber = poaNumberMatch[1].toUpperCase();
+  } else {
+    // Пробуем найти простой номер: "№123" или "123-2024"
+    const simpleNumber = filename.match(/№?\s*(\d+[-\/]?\d*)/);
+    if (simpleNumber && simpleNumber[1]) {
+      result.poaNumber = simpleNumber[1];
+    }
+  }
+
+  // Извлекаем дату выдачи: "от 01.01.2024", "от 01-01-2024", "выдана 01.01.2024"
+  const issueDateMatch = filename.match(/(?:от|выдан[аы]?)\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i);
+  if (issueDateMatch && issueDateMatch[1]) {
+    result.issueDate = issueDateMatch[1].replace(/[-\/]/g, '.');
+  }
+
+  // Извлекаем срок действия: "до 31.12.2024", "по 31.12.2024", "действует до 31.12.2024"
+  const validUntilMatch = filename.match(/(?:до|по|действ[а-я]*\s*до)\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i);
+  if (validUntilMatch && validUntilMatch[1]) {
+    result.validUntil = validUntilMatch[1].replace(/[-\/]/g, '.');
+  }
+
+  // Если нет явных дат, пробуем найти диапазон дат: "01.01.2024-31.12.2024"
+  if (result.issueDate === 'Не указано' && result.validUntil === 'Не указано') {
+    const dateRangeMatch = filename.match(/(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\s*[-–—]\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/);
+    if (dateRangeMatch) {
+      result.issueDate = dateRangeMatch[1].replace(/[-\/]/g, '.');
+      result.validUntil = dateRangeMatch[2].replace(/[-\/]/g, '.');
+    }
+  }
+
+  return result;
+}
+
 // Функция получения информации о файле через Files API
 async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string } | null> {
   try {
@@ -264,20 +384,28 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           }
         }
 
+        // Извлекаем поля доверенности из названия файла
+        const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+
         return {
           fileName: fileName || 'Документ',
           fileId,
           createdAt,
-          size: doc.size
+          size: doc.size,
+          fio,
+          poaNumber,
+          issueDate,
+          validUntil
         };
       })
     );
 
-    // Форматируем список документов
+    // Форматируем список документов с предварительно извлечёнными полями
     const formattedResults = enrichedDocuments.map((doc, i: number) => {
       const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
 
-      return `[${i + 1}] ${doc.fileName} (file_id: ${doc.fileId}${doc.createdAt ? `, загружен: ${doc.createdAt}` : ''}${sizeStr ? `, размер: ${sizeStr}` : ''})`;
+      // Добавляем извлечённые поля напрямую в формат данных для Grok
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
     }).join('\n');
 
     // Добавляем итоговую информацию
@@ -484,9 +612,14 @@ if (isListAll) {
       documentResults = await getAllDocuments(apiKey, collectionId);
       console.log('All documents results length:', documentResults.length);
 
+      // Определяем, какие поля запросил пользователь
+      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+      const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
+      console.log('Requested table fields:', fields);
+
       const collectionName = collectionConfig?.displayName || 'документов';
       contextSection = documentResults
-        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа. Сформируй красивую таблицу со всеми документами.`
+        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}`
         : `\n\nВ базе данных "${collectionName}" нет документов.`;
     } else {
       // Для обычных запросов - используем поиск
