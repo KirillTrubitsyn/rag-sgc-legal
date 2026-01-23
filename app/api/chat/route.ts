@@ -264,7 +264,7 @@ function extractPoaFieldsFromFilename(filename: string): {
 }
 
 // Функция получения информации о файле через Files API
-async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string } | null> {
+async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string; allFields: any } | null> {
   try {
     const response = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
       method: 'GET',
@@ -274,17 +274,174 @@ async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: 
     });
 
     if (!response.ok) {
+      console.log(`Files API error for ${fileId}:`, response.status);
       return null;
     }
 
     const data = await response.json();
-    // xAI Files API возвращает filename в поле filename или name
-    const filename = data.filename || data.name || data.original_filename || null;
+
+    // Логируем ВСЕ поля для диагностики
+    console.log(`Files API response for ${fileId}:`, JSON.stringify(data, null, 2));
+
+    // Пробуем все возможные поля с названием файла
+    const filename = data.filename || data.name || data.original_filename || data.file_name || data.title || null;
     const createdAt = data.created_at ? new Date(data.created_at * 1000).toLocaleDateString('ru-RU') : '';
 
-    return filename ? { filename, createdAt } : null;
-  } catch {
+    return { filename, createdAt, allFields: data };
+  } catch (error) {
+    console.error(`Files API exception for ${fileId}:`, error);
     return null;
+  }
+}
+
+// Функция извлечения метаданных доверенности из текста
+function extractPoaFieldsFromContent(content: string): {
+  fio: string;
+  poaNumber: string;
+  issueDate: string;
+  validUntil: string;
+} {
+  const result = {
+    fio: 'Не указано',
+    poaNumber: 'Не указано',
+    issueDate: 'Не указано',
+    validUntil: 'Не указано'
+  };
+
+  if (!content) return result;
+
+  // Извлекаем ФИО - ищем паттерны типа "Иванов Иван Иванович", "Иванов И.И."
+  const fioPatterns = [
+    /(?:уполномочивает|доверяет|доверяю|настоящей\s+доверенностью)[^\n]*?([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
+    /(?:представител[а-яё]*|гражданин[а-яё]*)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
+    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)(?:\s*,?\s*(?:паспорт|дата\s+рождения|проживающ))/i,
+    /(?:на\s+имя|выдана)\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
+  ];
+  for (const pattern of fioPatterns) {
+    const match = content.match(pattern);
+    if (match && match[1]) {
+      result.fio = match[1].trim();
+      break;
+    }
+  }
+
+  // Извлекаем номер доверенности
+  const numberPatterns = [
+    /доверенност[ьи]\s*№?\s*([А-ЯЁA-Z]{2,}-\d{2,}-\d+)/i,
+    /№\s*([А-ЯЁA-Z]{2,}-\d{2,}-\d+)/i,
+    /(?:номер|рег\.?\s*№|per\.?\s*№)[:\s]*([А-ЯЁA-Z0-9\-\/]+)/i,
+  ];
+  for (const pattern of numberPatterns) {
+    const match = content.match(pattern);
+    if (match && match[1] && match[1].length > 3) {
+      result.poaNumber = match[1].trim().toUpperCase();
+      break;
+    }
+  }
+
+  // Извлекаем дату выдачи
+  const issueDatePatterns = [
+    /(?:от|выдан[аы]?)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /(?:дата\s*(?:выдачи|составления))[:\s]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{4})\s*(?:года?|г\.?)?\s*$/im,
+  ];
+  for (const pattern of issueDatePatterns) {
+    const match = content.match(pattern);
+    if (match && match[1]) {
+      result.issueDate = match[1].replace(/[-\/]/g, '.');
+      break;
+    }
+  }
+
+  // Извлекаем срок действия
+  const validUntilPatterns = [
+    /(?:действительн[а-яё]*|срок[а-яё]*\s*действи[а-яё]*)[:\s]*(?:до|по)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /(?:по|до)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})[»"»]?\s*(?:года?|г\.?)?/i,
+    /сроком?\s+(?:на|до)\s+(\d+)\s*(?:год|лет|месяц)/i,
+  ];
+  for (const pattern of validUntilPatterns) {
+    const match = content.match(pattern);
+    if (match && match[1]) {
+      // Проверяем, что это дата, а не период
+      if (/\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}/.test(match[1])) {
+        result.validUntil = match[1].replace(/[-\/]/g, '.');
+      }
+      break;
+    }
+  }
+
+  return result;
+}
+
+// Функция поиска и извлечения данных из всех документов коллекции
+async function searchAllDocumentsContent(apiKey: string, collectionId: string): Promise<Map<string, {
+  fio: string;
+  poaNumber: string;
+  issueDate: string;
+  validUntil: string;
+}>> {
+  const resultsMap = new Map();
+
+  try {
+    // Делаем поиск по коллекции для получения содержимого всех документов
+    const response = await fetch('https://api.x.ai/v1/collections/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'доверенность уполномочивает представлять интересы подписывать',
+        collection_ids: [collectionId],
+        top_k: 100, // Получаем максимум результатов
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Search all documents failed:', response.status);
+      return resultsMap;
+    }
+
+    const data = await response.json();
+    console.log(`Search returned ${data.results?.length || 0} results`);
+
+    // Обрабатываем каждый результат
+    for (const result of (data.results || [])) {
+      const fileId = result.metadata?.file_id || result.file_id || '';
+      const content = result.content || '';
+
+      if (fileId && content) {
+        const extracted = extractPoaFieldsFromContent(content);
+
+        // Сохраняем только если есть хотя бы одно полезное поле
+        if (extracted.fio !== 'Не указано' || extracted.poaNumber !== 'Не указано') {
+          // Если уже есть данные для этого файла, объединяем
+          const existing = resultsMap.get(fileId);
+          if (existing) {
+            if (existing.fio === 'Не указано' && extracted.fio !== 'Не указано') {
+              existing.fio = extracted.fio;
+            }
+            if (existing.poaNumber === 'Не указано' && extracted.poaNumber !== 'Не указано') {
+              existing.poaNumber = extracted.poaNumber;
+            }
+            if (existing.issueDate === 'Не указано' && extracted.issueDate !== 'Не указано') {
+              existing.issueDate = extracted.issueDate;
+            }
+            if (existing.validUntil === 'Не указано' && extracted.validUntil !== 'Не указано') {
+              existing.validUntil = extracted.validUntil;
+            }
+          } else {
+            resultsMap.set(fileId, extracted);
+          }
+        }
+      }
+    }
+
+    console.log(`Extracted data for ${resultsMap.size} unique documents`);
+    return resultsMap;
+  } catch (error) {
+    console.error('Search all documents error:', error);
+    return resultsMap;
   }
 }
 
@@ -357,14 +514,26 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       return '';
     }
 
-    // Логируем первый документ для отладки
+    // Логируем первый документ для отладки - ВСЕ поля
     if (allDocuments[0]) {
-      console.log('First document keys:', Object.keys(allDocuments[0]));
-      console.log('First document preview:', JSON.stringify(allDocuments[0]).substring(0, 500));
+      console.log('=== DOCUMENT STRUCTURE DEBUG ===');
+      console.log('First document FULL:', JSON.stringify(allDocuments[0], null, 2));
+      console.log('All keys:', Object.keys(allDocuments[0]));
+      if (allDocuments[0].metadata) {
+        console.log('Metadata keys:', Object.keys(allDocuments[0].metadata));
+        console.log('Metadata:', JSON.stringify(allDocuments[0].metadata, null, 2));
+      }
+      if (allDocuments[0].fields) {
+        console.log('Fields:', JSON.stringify(allDocuments[0].fields, null, 2));
+      }
+      console.log('=== END DEBUG ===');
     }
 
-    // Обогащаем документы информацией из Files API для получения оригинальных названий
-    // Делаем параллельные запросы для ускорения
+    // Делаем один поиск для извлечения данных из содержимого всех документов
+    console.log('Searching all documents content for metadata extraction...');
+    const contentDataMap = await searchAllDocumentsContent(apiKey, collectionId);
+
+    // Обогащаем документы информацией из Files API и содержимого документов
     const enrichedDocuments = await Promise.all(
       allDocuments.map(async (doc: any) => {
         const fileId = doc.file_id || doc.id || '';
@@ -377,7 +546,7 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         if (!fileName || fileName === 'Документ') {
           const fileInfo = await getFileInfo(apiKey, fileId);
           if (fileInfo) {
-            fileName = fileInfo.filename;
+            fileName = fileInfo.filename || '';
             if (!createdAt && fileInfo.createdAt) {
               createdAt = fileInfo.createdAt;
             }
@@ -385,7 +554,24 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         }
 
         // Извлекаем поля доверенности из названия файла
-        const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+        let { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+
+        // Если данные не извлечены из названия файла - используем данные из содержимого
+        const contentData = contentDataMap.get(fileId);
+        if (contentData) {
+          if (fio === 'Не указано' && contentData.fio !== 'Не указано') {
+            fio = contentData.fio;
+          }
+          if (poaNumber === 'Не указано' && contentData.poaNumber !== 'Не указано') {
+            poaNumber = contentData.poaNumber;
+          }
+          if (issueDate === 'Не указано' && contentData.issueDate !== 'Не указано') {
+            issueDate = contentData.issueDate;
+          }
+          if (validUntil === 'Не указано' && contentData.validUntil !== 'Не указано') {
+            validUntil = contentData.validUntil;
+          }
+        }
 
         return {
           fileName: fileName || 'Документ',
