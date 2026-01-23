@@ -405,10 +405,19 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
     const data = await response.json();
     console.log(`Search returned ${data.results?.length || 0} results`);
 
+    // Логируем первый результат для отладки
+    if (data.results?.[0]) {
+      console.log('=== SEARCH RESULT DEBUG ===');
+      console.log('First search result:', JSON.stringify(data.results[0], null, 2));
+      console.log('Metadata:', JSON.stringify(data.results[0].metadata, null, 2));
+      console.log('=== END SEARCH DEBUG ===');
+    }
+
     // Обрабатываем каждый результат
     for (const result of (data.results || [])) {
-      const fileId = result.metadata?.file_id || result.file_id || '';
-      const content = result.content || '';
+      // Пробуем разные варианты получения file_id
+      const fileId = result.metadata?.file_id || result.file_id || result.document_id || result.id || '';
+      const content = result.content || result.text || '';
 
       if (fileId && content) {
         const extracted = extractPoaFieldsFromContent(content);
@@ -535,8 +544,18 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
     // Обогащаем документы информацией из Files API и содержимого документов
     const enrichedDocuments = await Promise.all(
-      allDocuments.map(async (doc: any) => {
-        const fileId = doc.file_id || doc.id || '';
+      allDocuments.map(async (doc: any, index: number) => {
+        // Пробуем разные варианты получения file_id
+        const fileId = doc.file_id || doc.id || doc.document_id || '';
+
+        if (index === 0) {
+          console.log(`Document ${index} - file_id sources:`, {
+            file_id: doc.file_id,
+            id: doc.id,
+            document_id: doc.document_id,
+            final: fileId
+          });
+        }
 
         // Пробуем получить имя из документа коллекции
         let fileName = doc.name || doc.file_name || doc.filename || doc.fields?.file_name || doc.metadata?.file_name || '';
@@ -558,6 +577,13 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
         // Если данные не извлечены из названия файла - используем данные из содержимого
         const contentData = contentDataMap.get(fileId);
+        if (index === 0) {
+          console.log(`Document ${index} - contentData lookup:`, {
+            fileId,
+            hasContentData: !!contentData,
+            contentDataMapKeys: Array.from(contentDataMap.keys()).slice(0, 5)
+          });
+        }
         if (contentData) {
           if (fio === 'Не указано' && contentData.fio !== 'Не указано') {
             fio = contentData.fio;
@@ -591,8 +617,16 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
 
       // Добавляем извлечённые поля напрямую в формат данных для Grok
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
+      // Включаем готовую ссылку на скачивание
+      const downloadLink = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}` : '';
+
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId} | Ссылка: ${downloadLink}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
     }).join('\n');
+
+    // Логируем первые 3 документа для отладки
+    console.log('=== FORMATTED DOCUMENTS PREVIEW ===');
+    console.log(formattedResults.split('\n').slice(0, 3).join('\n'));
+    console.log('=== END PREVIEW ===');
 
     // Добавляем итоговую информацию
     const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${enrichedDocuments.length}`;
