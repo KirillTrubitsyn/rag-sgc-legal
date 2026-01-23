@@ -467,8 +467,22 @@ function extractPoaFieldsFromContent(content: string): {
     }
   }
 
-  // Извлекаем дату выдачи - сначала пробуем даты прописью
-  // Ищем паттерн типа "двадцать четвертое июня две тысячи двадцать пятого года"
+  // Извлекаем даты - СНАЧАЛА ищем срок действия с контекстом "сроком до/по"
+  // Это более специфичный паттерн, который точно указывает на срок действия
+  const validUntilTextPattern = /(?:сроком?\s+|действ[а-яё]*\s+|выдан[аы]?\s+)?(?:до|по)\s+([а-яё]+(?:\s+[а-яё]+)?(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
+  let validUntilMatch;
+  let foundValidUntil: string | null = null;
+  while ((validUntilMatch = validUntilTextPattern.exec(normalizedContent)) !== null) {
+    const fullDateText = `${validUntilMatch[1]} ${validUntilMatch[2]} две тысячи ${validUntilMatch[3]} года`;
+    const parsed = parseRussianTextDate(fullDateText);
+    if (parsed) {
+      foundValidUntil = parsed;
+      result.validUntil = parsed;
+      break;
+    }
+  }
+
+  // Теперь ищем ВСЕ даты прописью для определения даты выдачи
   const textDatePattern = /([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
   const textDates: string[] = [];
   let textDateMatch;
@@ -479,11 +493,65 @@ function extractPoaFieldsFromContent(content: string): {
     }
   }
 
-  // Если нашли даты прописью, используем их
+  // Дата выдачи - это обычно первая дата в документе, которая НЕ является сроком действия
+  // И должна быть РАНЬШЕ срока действия
   if (textDates.length > 0) {
-    result.issueDate = textDates[0]; // Первая дата - дата выдачи
-    if (textDates.length > 1) {
-      result.validUntil = textDates[textDates.length - 1]; // Последняя дата - срок действия
+    // Функция для сравнения дат в формате DD.MM.YYYY
+    const parseDate = (dateStr: string): Date | null => {
+      const parts = dateStr.split('.');
+      if (parts.length !== 3) return null;
+      return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    };
+
+    // Ищем дату выдачи среди найденных дат
+    for (const date of textDates) {
+      // Пропускаем дату, которую уже определили как срок действия
+      if (date === foundValidUntil) continue;
+
+      // Если срок действия найден, проверяем что дата выдачи раньше
+      if (foundValidUntil) {
+        const issueD = parseDate(date);
+        const validD = parseDate(foundValidUntil);
+        if (issueD && validD && issueD < validD) {
+          result.issueDate = date;
+          break;
+        }
+      } else {
+        // Если срок действия не найден, берем первую дату как дату выдачи
+        result.issueDate = date;
+        break;
+      }
+    }
+
+    // Если дата выдачи всё ещё не найдена, но есть даты - пробуем взять самую раннюю
+    if (result.issueDate === 'Не указано' && textDates.length > 0) {
+      const sortedDates = [...textDates].sort((a, b) => {
+        const dateA = parseDate(a);
+        const dateB = parseDate(b);
+        if (!dateA || !dateB) return 0;
+        return dateA.getTime() - dateB.getTime();
+      });
+      // Самая ранняя дата - дата выдачи (если она не совпадает со сроком действия)
+      if (sortedDates[0] !== foundValidUntil) {
+        result.issueDate = sortedDates[0];
+      } else if (sortedDates.length > 1) {
+        result.issueDate = sortedDates[1];
+      }
+    }
+
+    // Если срок действия не был найден контекстным поиском,
+    // пробуем взять последнюю (самую позднюю) дату
+    if (result.validUntil === 'Не указано' && textDates.length > 1) {
+      const sortedDates = [...textDates].sort((a, b) => {
+        const dateA = parseDate(a);
+        const dateB = parseDate(b);
+        if (!dateA || !dateB) return 0;
+        return dateA.getTime() - dateB.getTime();
+      });
+      const lastDate = sortedDates[sortedDates.length - 1];
+      if (lastDate !== result.issueDate) {
+        result.validUntil = lastDate;
+      }
     }
   }
 
@@ -518,37 +586,6 @@ function extractPoaFieldsFromContent(content: string): {
         }
 
         result.issueDate = `${day}.${month}.${year}`;
-        break;
-      }
-    }
-  }
-
-  // Если срок действия не найден прописью, пробуем найти через дополнительные паттерны
-  if (result.validUntil === 'Не указано') {
-    // Паттерн для дат прописью с "по" или "до"
-    // Примеры: "сроком по девятое апреля...", "действительна до тридцать первого декабря...", "по двадцать седьмое июня..."
-    const textDateWithPoPattern = /(?:сроком\s+|действ[а-яё]*\s+|выдана?\s+)?(?:по|до)\s+([а-яё]+(?:\s+[а-яё]+)?(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
-    let textMatch;
-    while ((textMatch = textDateWithPoPattern.exec(normalizedContent)) !== null) {
-      // Собираем полную дату для parseRussianTextDate
-      const fullDateText = `${textMatch[1]} ${textMatch[2]} две тысячи ${textMatch[3]} года`;
-      const parsed = parseRussianTextDate(fullDateText);
-      if (parsed && parsed !== result.issueDate) {
-        result.validUntil = parsed;
-        break;
-      }
-    }
-  }
-
-  // Дополнительный паттерн: ищем "включительно" после даты - это обычно срок действия
-  if (result.validUntil === 'Не указано') {
-    const inclusivePattern = /([а-яё]+(?:\s+[а-яё]+)?(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года\s+включительно/gi;
-    let inclusiveMatch;
-    while ((inclusiveMatch = inclusivePattern.exec(normalizedContent)) !== null) {
-      const fullDateText = `${inclusiveMatch[1]} ${inclusiveMatch[2]} две тысячи ${inclusiveMatch[3]} года`;
-      const parsed = parseRussianTextDate(fullDateText);
-      if (parsed && parsed !== result.issueDate) {
-        result.validUntil = parsed;
         break;
       }
     }
