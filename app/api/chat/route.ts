@@ -1,4 +1,4 @@
-import { legalSystemPrompt, poaSystemPrompt } from '@/lib/grok-client';
+import { legalSystemPrompt, poaSystemPrompt, uploadedDocumentSystemPrompt } from '@/lib/grok-client';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -68,10 +68,21 @@ function isPowerOfAttorneyQuery(query: string): boolean {
   return POA_KEYWORDS.some(keyword => lowerQuery.includes(keyword));
 }
 
+// Проверка, содержит ли сообщение загруженные документы
+function hasUploadedDocuments(messages: any[]): boolean {
+  const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+  if (!lastUserMessage) return false;
+  return lastUserMessage.content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
+}
+
 // Определение типа запроса на основе сообщений
-type QueryType = 'poa' | 'general' | 'both' | 'poa_list_all' | 'general_list_all';
+type QueryType = 'poa' | 'general' | 'both' | 'poa_list_all' | 'general_list_all' | 'uploaded_document';
 
 function determineQueryType(messages: any[]): QueryType {
+  // Сначала проверяем, есть ли загруженные документы
+  if (hasUploadedDocuments(messages)) {
+    return 'uploaded_document';
+  }
   // Проверяем последние 3 сообщения пользователя
   const userMessages = messages
     .filter((m: any) => m.role === 'user')
@@ -330,8 +341,15 @@ export async function POST(req: Request) {
     let collectionId: string;
     let baseSystemPrompt: string;
     let isListAllRequest = false;
+    let isUploadedDocumentRequest = false;
 
-    if (queryType === 'poa_list_all' && poaCollectionId) {
+    if (queryType === 'uploaded_document') {
+      // Для загруженных документов не используем коллекции
+      collectionId = generalCollectionId; // Не используется, но нужен для типизации
+      baseSystemPrompt = uploadedDocumentSystemPrompt;
+      isUploadedDocumentRequest = true;
+      console.log('Using uploaded document mode - no collection search');
+    } else if (queryType === 'poa_list_all' && poaCollectionId) {
       collectionId = poaCollectionId;
       baseSystemPrompt = poaSystemPrompt;
       isListAllRequest = true;
@@ -355,7 +373,12 @@ export async function POST(req: Request) {
     let documentResults: string;
     let contextSection: string;
 
-    if (isListAllRequest) {
+    if (isUploadedDocumentRequest) {
+      // Для загруженных документов - контекст уже в сообщении пользователя
+      documentResults = '';
+      contextSection = '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в сообщении пользователя.';
+      console.log('Uploaded document mode - using user message context');
+    } else if (isListAllRequest) {
       // Для запросов о полном списке - получаем ВСЕ документы из коллекции
       console.log('Fetching ALL documents from collection...');
       documentResults = await getAllDocuments(apiKey, collectionId);
