@@ -219,14 +219,7 @@ const RUSSIAN_YEARS: Record<string, number> = {
   'двадцать первого': 2021, 'двадцать второго': 2022, 'двадцать третьего': 2023,
   'двадцать четвертого': 2024, 'двадцать пятого': 2025, 'двадцать шестого': 2026,
   'двадцать седьмого': 2027, 'двадцать восьмого': 2028, 'двадцать девятого': 2029,
-  'тридцатого': 2030, 'тридцать первого': 2031, 'тридцать второго': 2032,
-  'тридцать третьего': 2033, 'тридцать четвертого': 2034, 'тридцать пятого': 2035,
-};
-
-// Дополнительные числа для года (единицы)
-const RUSSIAN_YEAR_UNITS: Record<string, number> = {
-  'первого': 1, 'второго': 2, 'третьего': 3, 'четвертого': 4, 'пятого': 5,
-  'шестого': 6, 'седьмого': 7, 'восьмого': 8, 'девятого': 9,
+  'тридцатого': 2030,
 };
 
 /**
@@ -260,22 +253,20 @@ function parseRussianTextDate(text: string): string | null {
 
   // Парсим год (две тысячи + X)
   let year = 2000;
-  const yearKey = yearText.trim().toLowerCase();
+  const yearKey = yearText.trim();
   if (RUSSIAN_YEARS[yearKey]) {
     year = RUSSIAN_YEARS[yearKey];
   } else {
-    // Пробуем парсить по словам: "двадцать седьмого" -> 20 + 7 = 27
+    // Пробуем парсить по словам
     const yearWords = yearKey.split(/\s+/);
     for (const word of yearWords) {
       if (RUSSIAN_NUMBERS[word]) {
         year += RUSSIAN_NUMBERS[word];
-      } else if (RUSSIAN_YEAR_UNITS[word]) {
-        year += RUSSIAN_YEAR_UNITS[word];
       }
     }
   }
 
-  if (year < 2020 || year > 2050) return null;
+  if (year < 2020 || year > 2040) return null;
 
   return `${day.toString().padStart(2, '0')}.${month}.${year}`;
 }
@@ -519,24 +510,7 @@ function extractPoaFieldsFromContent(content: string): {
     }
   }
 
-  // Если срок действия не найден прописью, пробуем найти через дополнительные паттерны
-  if (result.validUntil === 'Не указано') {
-    // Сначала пробуем найти дату прописью с "по" или "до"
-    // Паттерн для: "по девятое апреля две тысячи двадцать седьмого года"
-    const textDateWithPoPattern = /(?:сроком\s+)?(?:по|до)\s+([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
-    let textMatch;
-    while ((textMatch = textDateWithPoPattern.exec(normalizedContent)) !== null) {
-      // Собираем полную дату для parseRussianTextDate
-      const fullDateText = `${textMatch[1]} ${textMatch[2]} две тысячи ${textMatch[3]} года`;
-      const parsed = parseRussianTextDate(fullDateText);
-      if (parsed && parsed !== result.issueDate) {
-        result.validUntil = parsed;
-        break;
-      }
-    }
-  }
-
-  // Если срок действия всё ещё не найден, пробуем цифровые форматы
+  // Если срок действия не найден прописью, пробуем цифровые форматы
   if (result.validUntil === 'Не указано') {
     const validUntilPatterns = [
       // "сроком по [дата прописью]" - специальный паттерн
@@ -732,29 +706,12 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     console.log(`List API returned ${allDocuments.length} documents`);
 
     // ШАГ 2: Собираем контент через поиск для извлечения метаданных
-    // Расширенный список запросов для поиска дат и метаданных
     const searchQueries = [
       'доверенность',
       'уполномочивает представлять интересы',
-      'настоящей доверенностью',
-      // Запросы для поиска дат прописью
       'сроком по года включительно',
       'две тысячи двадцать года',
-      'по января две тысячи',
-      'по февраля две тысячи',
-      'по марта две тысячи',
-      'по апреля две тысячи',
-      'по мая две тысячи',
-      'по июня две тысячи',
-      'по июля две тысячи',
-      'по августа две тысячи',
-      'по сентября две тысячи',
-      'по октября две тысячи',
-      'по ноября две тысячи',
-      'по декабря две тысячи',
-      // Дополнительные запросы для дат выдачи
-      'года выдана доверенность',
-      'настоящая доверенность выдана',
+      'настоящей доверенностью',
     ];
 
     // Map для хранения контента по file_id
