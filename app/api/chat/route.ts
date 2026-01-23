@@ -1,7 +1,65 @@
-import { legalSystemPrompt } from '@/lib/grok-client';
+import { legalSystemPrompt, poaSystemPrompt } from '@/lib/grok-client';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
+
+// Ключевые слова для определения запросов о доверенностях и полномочиях
+const POA_KEYWORDS = [
+  // Основные термины
+  'доверенност', 'полномочи', 'уполномоч', 'представител',
+  'право подписи', 'право подписания', 'подписывать', 'подписать',
+  'от имени', 'по доверенности', 'делегирован', 'передача полномочий',
+  'кто может подписать', 'кто имеет право', 'кто уполномочен',
+  'представлять интересы', 'действовать от имени',
+
+  // Типы документов для подписания
+  'подписание договор', 'подписать договор', 'заключить договор', 'заключать договор',
+  'подписание акт', 'подписать акт', 'акт выполненных работ', 'акт приема',
+  'подписание письм', 'подписать письм', 'письма в госорган', 'государственные органы',
+  'подписание счет', 'подписать счет', 'счет-фактур',
+  'подписание накладн', 'подписать накладн', 'товарная накладная',
+  'подписание приказ', 'подписать приказ',
+  'подписание соглашен', 'подписать соглашен', 'дополнительное соглашение',
+
+  // Финансовые ограничения
+  'на сумму', 'до суммы', 'лимит', 'ограничен', 'не более', 'не превышающ',
+  'рублей', 'миллион', 'тысяч',
+
+  // Организации группы СГК
+  'от имени сгк', 'от имени кузбассэнерго', 'от имени енисейской', 'от имени тгк',
+  'сгк', 'кузбассэнерго', 'енисейская', 'тгк-13', 'тгк 13',
+
+  // Вопросы о возможности/праве
+  'может ли', 'имеет ли право', 'есть ли у', 'вправе ли',
+  'кто может', 'кто вправе', 'кто имеет',
+
+  // ФИО из документов - примеры для поиска по конкретным сотрудникам
+  'мажирин', 'денисов', 'ким', 'пономарева', 'голофаст', 'шемчук', 'стромов'
+];
+
+// Функция определения, касается ли запрос доверенностей и полномочий
+function isPowerOfAttorneyQuery(query: string): boolean {
+  const lowerQuery = query.toLowerCase();
+  return POA_KEYWORDS.some(keyword => lowerQuery.includes(keyword));
+}
+
+// Определение типа запроса на основе сообщений
+type QueryType = 'poa' | 'general' | 'both';
+
+function determineQueryType(messages: any[]): QueryType {
+  // Проверяем последние 3 сообщения пользователя
+  const userMessages = messages
+    .filter((m: any) => m.role === 'user')
+    .slice(-3);
+
+  const combinedText = userMessages.map((m: any) => m.content).join(' ');
+
+  if (isPowerOfAttorneyQuery(combinedText)) {
+    return 'poa';
+  }
+
+  return 'general';
+}
 
 // Функция поиска по коллекции через правильный endpoint
 async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
@@ -119,17 +177,34 @@ export async function POST(req: Request) {
     console.log('Messages received:', messages.length);
 
     const apiKey = process.env.XAI_API_KEY;
-    const collectionId = process.env.COLLECTION_ID;
+    const generalCollectionId = process.env.COLLECTION_ID;
+    const poaCollectionId = process.env.POA_COLLECTION_ID;
 
-    if (!apiKey || !collectionId) {
-      console.error('Missing env vars. apiKey:', !!apiKey, 'collectionId:', !!collectionId);
+    if (!apiKey || !generalCollectionId) {
+      console.error('Missing env vars. apiKey:', !!apiKey, 'generalCollectionId:', !!generalCollectionId);
       return new Response(
         JSON.stringify({ error: 'Missing env vars' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Using collection ID:', collectionId);
+    // Определяем тип запроса
+    const queryType = determineQueryType(messages);
+    console.log('Query type detected:', queryType);
+
+    // Выбираем коллекцию и промпт на основе типа запроса
+    let collectionId: string;
+    let baseSystemPrompt: string;
+
+    if (queryType === 'poa' && poaCollectionId) {
+      collectionId = poaCollectionId;
+      baseSystemPrompt = poaSystemPrompt;
+      console.log('Using POA collection:', collectionId);
+    } else {
+      collectionId = generalCollectionId;
+      baseSystemPrompt = legalSystemPrompt;
+      console.log('Using general collection:', collectionId);
+    }
 
     // Формируем поисковый запрос с учетом контекста предыдущих сообщений
     const searchQuery = buildContextualSearchQuery(messages, 3);
@@ -143,7 +218,7 @@ export async function POST(req: Request) {
       ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${searchResults}\n\nИспользуйте информацию из найденных документов для ответа.`
       : '\n\nПоиск по документам не вернул результатов.';
 
-    const systemPromptWithContext = legalSystemPrompt + contextSection;
+    const systemPromptWithContext = baseSystemPrompt + contextSection;
 
     const apiMessages = messages.map((m: any) => ({
       role: m.role,
