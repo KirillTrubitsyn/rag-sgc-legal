@@ -1041,6 +1041,20 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           if (validUntil === 'Не указано' && contentFields.validUntil !== 'Не указано') {
             validUntil = contentFields.validUntil;
           }
+
+          // Если всё ещё не нашли - пробуем каждый чанк отдельно (fallback)
+          if (issueDate === 'Не указано' || validUntil === 'Не указано') {
+            for (const chunkContent of chunks) {
+              const chunkFields = extractPoaFieldsFromContent(chunkContent);
+
+              if (issueDate === 'Не указано' && chunkFields.issueDate !== 'Не указано') {
+                issueDate = chunkFields.issueDate;
+              }
+              if (validUntil === 'Не указано' && chunkFields.validUntil !== 'Не указано') {
+                validUntil = chunkFields.validUntil;
+              }
+            }
+          }
         }
 
         if (index < 3) {
