@@ -656,31 +656,68 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
 }
 
 // Функция получения ПОЛНОГО списка всех документов из коллекции
-// Использует поисковый API вместо списка документов, так как поиск гарантированно возвращает file_id
+// Сначала получаем ВСЕ документы через list API, потом ищем контент для метаданных
 async function getAllDocuments(apiKey: string, collectionId: string): Promise<string> {
-  console.log('=== Get All Documents via Search ===');
+  console.log('=== Get All Documents ===');
   console.log('Collection ID:', collectionId);
 
   try {
-    // Используем поисковый API с разными запросами для получения разных частей документов
-    // Это помогает собрать больше информации (даты могут быть в разных частях)
+    // ШАГ 1: Получаем ВСЕ документы через list API (гарантирует полный список)
+    let allDocuments: any[] = [];
+    let cursor: string | null = null;
+    const limit = 100;
+
+    do {
+      const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
+      url.searchParams.set('limit', limit.toString());
+      if (cursor) {
+        url.searchParams.set('starting_after', cursor);
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error('Documents list failed:', response.status);
+        break;
+      }
+
+      const data = await response.json();
+      const documents = data.data || data.documents || [];
+
+      if (documents.length === 0) break;
+
+      allDocuments = allDocuments.concat(documents);
+
+      const hasMore = data.has_more || (documents.length === limit);
+      if (hasMore && documents.length > 0) {
+        const lastDoc = documents[documents.length - 1];
+        cursor = lastDoc.file_id || lastDoc.id;
+      } else {
+        cursor = null;
+      }
+    } while (cursor);
+
+    console.log(`List API returned ${allDocuments.length} documents`);
+
+    // ШАГ 2: Собираем контент через поиск для извлечения метаданных
     const searchQueries = [
       'доверенность',
       'уполномочивает представлять интересы',
-      'право подписи договор акт',
-      'сроком по года включительно', // Запрос для поиска дат окончания (прописью)
-      'две тысячи двадцать года', // Запрос для дат прописью
-      'настоящей доверенностью', // Общий текст доверенностей
-      'АО Кемеровская генерация СГК', // Название организации
-      'Генерального директора', // Должность
+      'сроком по года включительно',
+      'две тысячи двадцать года',
+      'настоящей доверенностью',
     ];
 
-    // Структура для хранения всех chunks по file_id
-    const allChunks = new Map<string, { chunks: string[]; result: any }>();
+    // Map для хранения контента по file_id
+    const contentByFileId = new Map<string, string[]>();
 
     for (const query of searchQueries) {
-      console.log(`Searching with query: "${query}"`);
-
       const response = await fetch('https://api.x.ai/v1/documents/search', {
         method: 'POST',
         headers: {
@@ -689,77 +726,45 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         },
         body: JSON.stringify({
           query: query,
-          source: {
-            collection_ids: [collectionId]
-          },
-          retrieval_mode: {
-            type: 'hybrid'
-          },
+          source: { collection_ids: [collectionId] },
+          retrieval_mode: { type: 'hybrid' },
           max_num_results: 100,
           top_k: 100,
         }),
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Search failed for "${query}":`, response.status, errorText);
-        continue;
-      }
+      if (!response.ok) continue;
 
       const data = await response.json();
       const results = data.matches || data.results || [];
-      console.log(`Search "${query}" returned ${results.length} results`);
 
-      // Собираем ВСЕ chunks для каждого документа
       for (const result of results) {
         const fileId = result.file_id || '';
         const content = result.chunk_content || result.content || result.text || '';
 
-        if (fileId) {
-          if (!allChunks.has(fileId)) {
-            allChunks.set(fileId, { chunks: [], result });
+        if (fileId && content) {
+          if (!contentByFileId.has(fileId)) {
+            contentByFileId.set(fileId, []);
           }
-          // Добавляем chunk если он уникальный
-          const existing = allChunks.get(fileId)!;
-          if (content && !existing.chunks.includes(content)) {
-            existing.chunks.push(content);
+          const chunks = contentByFileId.get(fileId)!;
+          if (!chunks.includes(content)) {
+            chunks.push(content);
           }
         }
       }
     }
 
-    console.log(`Total unique documents found: ${allChunks.size}`);
+    console.log(`Search collected content for ${contentByFileId.size} documents`);
 
-    if (allChunks.size === 0) {
-      console.log('No documents found in collection via search');
-      // Fallback: попробуем получить документы через list endpoint
-      return await getAllDocumentsViaList(apiKey, collectionId);
-    }
-
-    // Логируем первый результат для отладки
-    const firstEntry = Array.from(allChunks.entries())[0];
-    if (firstEntry) {
-      const [fileId, data] = firstEntry;
-      console.log('=== SEARCH RESULT STRUCTURE DEBUG ===');
-      console.log('file_id:', fileId);
-      console.log('Total chunks for this document:', data.chunks.length);
-      console.log('First chunk preview:', data.chunks[0]?.substring(0, 200));
-      console.log('Result keys:', Object.keys(data.result));
-      console.log('fields:', JSON.stringify(data.result.fields, null, 2));
-      console.log('=== END DEBUG ===');
-    }
-
-    // Обогащаем документы метаданными, используя ВСЕ chunks
+    // ШАГ 3: Обогащаем ВСЕ документы из list API данными из поиска
     const enrichedDocuments = await Promise.all(
-      Array.from(allChunks.entries()).map(async ([fileId, data], index) => {
-        const { chunks, result } = data;
+      allDocuments.map(async (doc: any, index: number) => {
+        const fileId = doc.file_id || doc.id || '';
 
-        // Получаем имя файла из разных источников
-        let fileName = result.fields?.file_name || result.fields?.name ||
-                       result.metadata?.file_name || result.metadata?.name ||
-                       result.name || '';
+        // Получаем имя файла
+        let fileName = doc.name || doc.file_name || doc.filename ||
+                       doc.fields?.file_name || doc.metadata?.file_name || '';
 
-        // Если имя не найдено, запрашиваем через Files API
         if (!fileName && fileId) {
           const fileInfo = await getFileInfo(apiKey, fileId);
           if (fileInfo?.filename) {
@@ -770,61 +775,42 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         // Извлекаем поля из названия файла
         let { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
 
-        // Извлекаем данные из ВСЕХ chunks документа
-        // Это важно, так как даты могут быть в разных частях документа
+        // Извлекаем данные из контента (если есть)
+        const chunks = contentByFileId.get(fileId) || [];
         for (const chunkContent of chunks) {
-          if (chunkContent) {
-            const contentFields = extractPoaFieldsFromContent(chunkContent);
+          const contentFields = extractPoaFieldsFromContent(chunkContent);
 
-            // Обновляем только если нашли новые данные
-            if (fio === 'Не указано' && contentFields.fio !== 'Не указано') {
-              fio = contentFields.fio;
-            }
-            if (poaNumber === 'Не указано' && contentFields.poaNumber !== 'Не указано') {
-              poaNumber = contentFields.poaNumber;
-            }
-            if (issueDate === 'Не указано' && contentFields.issueDate !== 'Не указано') {
-              issueDate = contentFields.issueDate;
-            }
-            if (validUntil === 'Не указано' && contentFields.validUntil !== 'Не указано') {
-              validUntil = contentFields.validUntil;
-            }
+          if (fio === 'Не указано' && contentFields.fio !== 'Не указано') {
+            fio = contentFields.fio;
+          }
+          if (poaNumber === 'Не указано' && contentFields.poaNumber !== 'Не указано') {
+            poaNumber = contentFields.poaNumber;
+          }
+          if (issueDate === 'Не указано' && contentFields.issueDate !== 'Не указано') {
+            issueDate = contentFields.issueDate;
+          }
+          if (validUntil === 'Не указано' && contentFields.validUntil !== 'Не указано') {
+            validUntil = contentFields.validUntil;
           }
         }
 
         if (index < 3) {
-          console.log(`Document ${index}:`, {
-            fileId,
-            fileName,
-            chunksCount: chunks.length,
-            fio,
-            poaNumber,
-            issueDate,
-            validUntil
-          });
+          console.log(`Document ${index}:`, { fileId, fileName, chunksCount: chunks.length, fio, poaNumber, issueDate, validUntil });
         }
 
-        return {
-          fileName: fileName || 'Документ',
-          fileId,
-          fio,
-          poaNumber,
-          issueDate,
-          validUntil,
-          score: result.score
-        };
+        return { fileName: fileName || 'Документ', fileId, fio, poaNumber, issueDate, validUntil };
       })
     );
 
-    // Форматируем список документов
+    // Форматируем результаты
     const formattedResults = enrichedDocuments.map((doc, i) => {
-      // ВАЖНО: Ссылка генерируется только если есть file_id
-      const downloadLink = `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`;
+      const downloadLink = doc.fileId
+        ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
+        : '';
 
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId} | Ссылка: ${downloadLink}`;
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId || 'отсутствует'} | Ссылка: ${downloadLink}`;
     }).join('\n');
 
-    // Логируем первые 3 документа
     console.log('=== FORMATTED DOCUMENTS PREVIEW ===');
     console.log(formattedResults.split('\n').slice(0, 3).join('\n'));
     console.log('=== END PREVIEW ===');
