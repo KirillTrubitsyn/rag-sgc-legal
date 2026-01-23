@@ -738,10 +738,12 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
       // Логируем структуру первого документа для отладки
       if (allDocuments.length === 0 && documents.length > 0) {
-        console.log('=== LIST API FIRST DOCUMENT ===');
-        console.log('Keys:', Object.keys(documents[0]));
-        console.log('Full document:', JSON.stringify(documents[0], null, 2).substring(0, 1000));
-        console.log('=== END FIRST DOCUMENT ===');
+        console.log('=== LIST API RESPONSE ===');
+        console.log('Response keys:', Object.keys(data));
+        console.log('Documents count:', documents.length);
+        console.log('First document keys:', Object.keys(documents[0]));
+        console.log('First document:', JSON.stringify(documents[0], null, 2).substring(0, 1500));
+        console.log('=== END LIST API RESPONSE ===');
       }
 
       allDocuments = allDocuments.concat(documents);
@@ -809,6 +811,15 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const data = await response.json();
       const results = data.matches || data.results || [];
 
+      // Логируем первый результат первого поиска для отладки
+      if (query === 'доверенность' && results.length > 0) {
+        console.log('=== SEARCH API FIRST RESULT ===');
+        console.log('Result keys:', Object.keys(results[0]));
+        console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
+        console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
+        console.log('=== END SEARCH RESULT ===');
+      }
+
       for (const result of results) {
         const fileId = result.file_id || '';
         const content = result.chunk_content || result.content || result.text || '';
@@ -838,7 +849,27 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     console.log(`Search collected content for ${contentByFileId.size} documents`);
     console.log(`Search collected file names for ${fileNamesByFileId.size} documents`);
 
-    // ШАГ 3: Обогащаем ВСЕ документы из list API данными из поиска
+    // Логируем примеры найденных имён файлов
+    if (fileNamesByFileId.size > 0) {
+      const sampleNames = Array.from(fileNamesByFileId.entries()).slice(0, 3);
+      console.log('Sample file names from search:', sampleNames);
+    }
+
+    // Если list API вернул документы без имён, но search нашёл file_id - используем search как источник
+    // Также добавляем документы из search которых нет в list
+    const listFileIds = new Set(allDocuments.map((d: any) => d.file_id || d.id).filter(Boolean));
+    const searchFileIds = new Set([...contentByFileId.keys(), ...fileNamesByFileId.keys()]);
+
+    // Добавляем документы из search которых нет в list
+    for (const fileId of searchFileIds) {
+      if (!listFileIds.has(fileId)) {
+        allDocuments.push({ file_id: fileId });
+        console.log(`Added document from search: ${fileId}`);
+      }
+    }
+    console.log(`Total documents after merge: ${allDocuments.length} (list: ${listFileIds.size}, search unique: ${searchFileIds.size})`);
+
+    // ШАГ 3: Обогащаем ВСЕ документы данными из поиска и Files API
     const enrichedDocuments = await Promise.all(
       allDocuments.map(async (doc: any, index: number) => {
         const fileId = doc.file_id || doc.id || '';
@@ -852,12 +883,21 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           fileName = fileNamesByFileId.get(fileId) || '';
         }
 
-        // Если всё ещё нет - пробуем Files API
+        // ВСЕГДА пробуем Files API для получения имени если его нет
         if (!fileName && fileId) {
           const fileInfo = await getFileInfo(apiKey, fileId);
           if (fileInfo?.filename) {
             fileName = fileInfo.filename;
           }
+          // Логируем для отладки первых 3 документов
+          if (index < 3) {
+            console.log(`Files API for doc ${index}:`, fileInfo ? JSON.stringify(fileInfo.allFields).substring(0, 300) : 'null');
+          }
+        }
+
+        // Логируем для отладки
+        if (index < 3) {
+          console.log(`Doc ${index}: fileId=${fileId}, fileName=${fileName || 'EMPTY'}, fromSearch=${fileNamesByFileId.has(fileId)}`);
         }
 
         // Извлекаем поля из названия файла
