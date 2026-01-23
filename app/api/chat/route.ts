@@ -855,12 +855,21 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       console.log('Sample file names from search:', sampleNames);
     }
 
-    // Если list API вернул документы без имён, а search нашёл имена - используем search как источник
-    if (allDocuments.length > 0 && fileNamesByFileId.size > allDocuments.length * 0.5) {
-      console.log('Using search results as primary source for file names');
-    }
+    // Если list API вернул документы без имён, но search нашёл file_id - используем search как источник
+    // Также добавляем документы из search которых нет в list
+    const listFileIds = new Set(allDocuments.map((d: any) => d.file_id || d.id).filter(Boolean));
+    const searchFileIds = new Set([...contentByFileId.keys(), ...fileNamesByFileId.keys()]);
 
-    // ШАГ 3: Обогащаем ВСЕ документы из list API данными из поиска
+    // Добавляем документы из search которых нет в list
+    for (const fileId of searchFileIds) {
+      if (!listFileIds.has(fileId)) {
+        allDocuments.push({ file_id: fileId });
+        console.log(`Added document from search: ${fileId}`);
+      }
+    }
+    console.log(`Total documents after merge: ${allDocuments.length} (list: ${listFileIds.size}, search unique: ${searchFileIds.size})`);
+
+    // ШАГ 3: Обогащаем ВСЕ документы данными из поиска и Files API
     const enrichedDocuments = await Promise.all(
       allDocuments.map(async (doc: any, index: number) => {
         const fileId = doc.file_id || doc.id || '';
