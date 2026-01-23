@@ -143,10 +143,20 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
-// Функция извлечения ФИО и номера доверенности из названия файла
-// Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.).pdf", "ТГК-13-2024-001 Иванов И.И..pdf"
-function extractPoaFieldsFromFilename(filename: string): { fio: string; poaNumber: string } {
-  const result = { fio: 'Не указано', poaNumber: 'Не указано' };
+// Функция извлечения полей доверенности из названия файла
+// Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.) от 01.01.2024 до 31.12.2024.pdf"
+function extractPoaFieldsFromFilename(filename: string): {
+  fio: string;
+  poaNumber: string;
+  issueDate: string;
+  validUntil: string;
+} {
+  const result = {
+    fio: 'Не указано',
+    poaNumber: 'Не указано',
+    issueDate: 'Не указано',
+    validUntil: 'Не указано'
+  };
 
   if (!filename || filename === 'Документ') {
     return result;
@@ -174,6 +184,27 @@ function extractPoaFieldsFromFilename(filename: string): { fio: string; poaNumbe
     const simpleNumber = filename.match(/№?\s*(\d+[-\/]?\d*)/);
     if (simpleNumber && simpleNumber[1]) {
       result.poaNumber = simpleNumber[1];
+    }
+  }
+
+  // Извлекаем дату выдачи: "от 01.01.2024", "от 01-01-2024", "выдана 01.01.2024"
+  const issueDateMatch = filename.match(/(?:от|выдан[аы]?)\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i);
+  if (issueDateMatch && issueDateMatch[1]) {
+    result.issueDate = issueDateMatch[1].replace(/[-\/]/g, '.');
+  }
+
+  // Извлекаем срок действия: "до 31.12.2024", "по 31.12.2024", "действует до 31.12.2024"
+  const validUntilMatch = filename.match(/(?:до|по|действ[а-я]*\s*до)\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i);
+  if (validUntilMatch && validUntilMatch[1]) {
+    result.validUntil = validUntilMatch[1].replace(/[-\/]/g, '.');
+  }
+
+  // Если нет явных дат, пробуем найти диапазон дат: "01.01.2024-31.12.2024"
+  if (result.issueDate === 'Не указано' && result.validUntil === 'Не указано') {
+    const dateRangeMatch = filename.match(/(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\s*[-–—]\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/);
+    if (dateRangeMatch) {
+      result.issueDate = dateRangeMatch[1].replace(/[-\/]/g, '.');
+      result.validUntil = dateRangeMatch[2].replace(/[-\/]/g, '.');
     }
   }
 
@@ -301,8 +332,8 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           }
         }
 
-        // Извлекаем ФИО и номер доверенности из названия файла
-        const { fio, poaNumber } = extractPoaFieldsFromFilename(fileName);
+        // Извлекаем поля доверенности из названия файла
+        const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
 
         return {
           fileName: fileName || 'Документ',
@@ -310,7 +341,9 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           createdAt,
           size: doc.size,
           fio,
-          poaNumber
+          poaNumber,
+          issueDate,
+          validUntil
         };
       })
     );
@@ -320,7 +353,7 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
 
       // Добавляем извлечённые поля напрямую в формат данных для Grok
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | file_id: ${doc.fileId}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
     }).join('\n');
 
     // Добавляем итоговую информацию
