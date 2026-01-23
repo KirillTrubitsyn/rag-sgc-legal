@@ -98,6 +98,26 @@ function SummaryBlock({ text, onExpandTable }: { text: string; onExpandTable?: (
               </a>
             );
           },
+          // Обработка изображений - преобразуем ![text](url) в ссылку если это URL скачивания
+          img: ({ src, alt }) => {
+            const srcStr = typeof src === 'string' ? src : '';
+            // Если это ссылка на скачивание файла, отображаем как ссылку вместо изображения
+            if (srcStr.includes('/api/download')) {
+              return (
+                <a
+                  href={srcStr}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sgc-orange-600 hover:text-sgc-orange-700 underline decoration-sgc-orange-300 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  {alt || 'Скачать'}
+                </a>
+              );
+            }
+            // Для обычных изображений - стандартное отображение
+            return <img src={srcStr} alt={alt} className="max-w-full h-auto" />;
+          },
           // Компоненты для таблиц с кнопкой разворота на десктопе
           table: ({ children, node }) => {
             const tableRef = { current: null as HTMLTableElement | null };
@@ -286,6 +306,26 @@ function StructuredResponse({ content, onExpandTable }: { content: string; onExp
               {children}
             </blockquote>
           ),
+          // Обработка изображений - преобразуем ![text](url) в ссылку если это URL скачивания
+          img: ({ src, alt }) => {
+            const srcStr = typeof src === 'string' ? src : '';
+            // Если это ссылка на скачивание файла, отображаем как ссылку вместо изображения
+            if (srcStr.includes('/api/download')) {
+              return (
+                <a
+                  href={srcStr}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sgc-orange-600 hover:text-sgc-orange-700 underline decoration-sgc-orange-300 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  {alt || 'Скачать'}
+                </a>
+              );
+            }
+            // Для обычных изображений - стандартное отображение
+            return <img src={srcStr} alt={alt} className="max-w-full h-auto" />;
+          },
           // Компоненты для таблиц с кнопкой разворота
           table: ({ children }) => {
             const tableRef = { current: null as HTMLTableElement | null };
