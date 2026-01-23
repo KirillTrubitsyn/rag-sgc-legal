@@ -265,6 +265,11 @@ function extractPoaFieldsFromFilename(filename: string): {
 
 // Функция получения информации о файле через Files API
 async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string; allFields: any } | null> {
+  if (!fileId) {
+    console.log('getFileInfo: No fileId provided');
+    return null;
+  }
+
   try {
     const response = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
       method: 'GET',
@@ -274,18 +279,34 @@ async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: 
     });
 
     if (!response.ok) {
-      console.log(`Files API error for ${fileId}:`, response.status);
+      const errorText = await response.text().catch(() => '');
+      console.log(`Files API error for ${fileId}: status=${response.status}, error=${errorText.substring(0, 200)}`);
       return null;
     }
 
     const data = await response.json();
 
-    // Логируем ВСЕ поля для диагностики
-    console.log(`Files API response for ${fileId}:`, JSON.stringify(data, null, 2));
+    // Логируем первые несколько ответов для диагностики
+    console.log(`Files API response for ${fileId}:`, JSON.stringify(data, null, 2).substring(0, 500));
 
     // Пробуем все возможные поля с названием файла
-    const filename = data.filename || data.name || data.original_filename || data.file_name || data.title || null;
-    const createdAt = data.created_at ? new Date(data.created_at * 1000).toLocaleDateString('ru-RU') : '';
+    // Проверяем как прямые поля, так и вложенные в metadata/fields
+    const filename = data.filename || data.name || data.original_filename ||
+                     data.file_name || data.title ||
+                     data.metadata?.filename || data.metadata?.name || data.metadata?.file_name ||
+                     data.fields?.filename || data.fields?.name || data.fields?.file_name ||
+                     null;
+
+    // Обрабатываем дату создания - может быть в разных форматах
+    let createdAt = '';
+    if (data.created_at) {
+      // Проверяем, это timestamp в секундах или миллисекундах
+      const timestamp = data.created_at > 1e12 ? data.created_at : data.created_at * 1000;
+      createdAt = new Date(timestamp).toLocaleDateString('ru-RU');
+    } else if (data.metadata?.created_at) {
+      const timestamp = data.metadata.created_at > 1e12 ? data.metadata.created_at : data.metadata.created_at * 1000;
+      createdAt = new Date(timestamp).toLocaleDateString('ru-RU');
+    }
 
     return { filename, createdAt, allFields: data };
   } catch (error) {
@@ -310,63 +331,126 @@ function extractPoaFieldsFromContent(content: string): {
 
   if (!content) return result;
 
+  // Нормализуем текст для лучшего поиска
+  const normalizedContent = content.replace(/\s+/g, ' ');
+
   // Извлекаем ФИО - ищем паттерны типа "Иванов Иван Иванович", "Иванов И.И."
   const fioPatterns = [
-    /(?:уполномочивает|доверяет|доверяю|настоящей\s+доверенностью)[^\n]*?([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
-    /(?:представител[а-яё]*|гражданин[а-яё]*)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
-    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)(?:\s*,?\s*(?:паспорт|дата\s+рождения|проживающ))/i,
-    /(?:на\s+имя|выдана)\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
+    // Полное ФИО: Иванов Иван Иванович
+    /(?:уполномочива(?:ет|ю)|доверя(?:ет|ю)|настоящей\s+доверенностью)[^\n]{0,50}?([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
+    /(?:представител[а-яё]*|гражданин[а-яё]*|лицо)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
+    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)(?:\s*,?\s*(?:паспорт|дата\s+рождения|проживающ|зарегистрир))/i,
+    // Сокращённое ФИО: Иванов И.И. или Иванов И. И.
+    /(?:на\s+имя|выдана|представител[а-яё]*)[:\s]*([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
+    /(?:уполномочива|доверя)[^\n]{0,30}?([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
+    // Любое полное ФИО в тексте (три слова с заглавной буквы подряд)
+    /\b([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,})\b/,
   ];
   for (const pattern of fioPatterns) {
-    const match = content.match(pattern);
+    const match = normalizedContent.match(pattern);
     if (match && match[1]) {
-      result.fio = match[1].trim();
-      break;
+      // Проверяем, что это не название организации
+      const candidate = match[1].trim();
+      if (!/(ООО|ОАО|ЗАО|ПАО|АО|компани|организаци|общество)/i.test(candidate)) {
+        result.fio = candidate;
+        break;
+      }
     }
   }
 
-  // Извлекаем номер доверенности
+  // Извлекаем номер доверенности - более гибкие паттерны
   const numberPatterns = [
-    /доверенност[ьи]\s*№?\s*([А-ЯЁA-Z]{2,}-\d{2,}-\d+)/i,
-    /№\s*([А-ЯЁA-Z]{2,}-\d{2,}-\d+)/i,
-    /(?:номер|рег\.?\s*№|per\.?\s*№)[:\s]*([А-ЯЁA-Z0-9\-\/]+)/i,
+    // Стандартные форматы: КГ-24-127, ТГК-13-2024-001
+    /доверенност[ьи]?\s*№?\s*([А-ЯЁA-Z]{1,5}[-\s]?\d{2,4}[-\s]?\d+)/i,
+    /№\s*([А-ЯЁA-Z]{1,5}[-\s]?\d{2,4}[-\s]?\d+)/i,
+    // Номер с префиксом
+    /(?:номер|рег\.?\s*№|per\.?\s*№|№)[:\s]*([А-ЯЁA-Z0-9][\w\-\/]{3,})/i,
+    // Простой номер после слова "доверенность"
+    /доверенност[ьи]?\s+([А-ЯЁA-Z0-9\-\/]{4,})/i,
+    // Номер в формате 123/2024
+    /№\s*(\d+\/\d{4})/i,
   ];
   for (const pattern of numberPatterns) {
-    const match = content.match(pattern);
+    const match = normalizedContent.match(pattern);
     if (match && match[1] && match[1].length > 3) {
-      result.poaNumber = match[1].trim().toUpperCase();
+      result.poaNumber = match[1].trim().toUpperCase().replace(/\s+/g, '-');
       break;
     }
   }
 
-  // Извлекаем дату выдачи
+  // Извлекаем дату выдачи - более гибкие паттерны
   const issueDatePatterns = [
-    /(?:от|выдан[аы]?)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-    /(?:дата\s*(?:выдачи|составления))[:\s]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-    /(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{4})\s*(?:года?|г\.?)?\s*$/im,
+    // "от 01.01.2024", "от «01» января 2024"
+    /(?:от|выдан[аы]?)\s*[«"„]?(\d{1,2})[.\-\/\s»"]+(\d{1,2}|\w+)[.\-\/\s]+(\d{2,4})/i,
+    // Прямой формат даты в начале
+    /^[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})/m,
+    // "дата выдачи: 01.01.2024"
+    /(?:дата\s*(?:выдачи|составления|оформления))[:\s]*(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
+    // Простой формат даты dd.mm.yyyy
+    /(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})\s*(?:года?|г\.?)?/,
   ];
   for (const pattern of issueDatePatterns) {
-    const match = content.match(pattern);
-    if (match && match[1]) {
-      result.issueDate = match[1].replace(/[-\/]/g, '.');
+    const match = normalizedContent.match(pattern);
+    if (match) {
+      // Формируем дату
+      const day = match[1].padStart(2, '0');
+      let month = match[2];
+      const year = match[3].length === 2 ? '20' + match[3] : match[3];
+
+      // Если месяц текстовый, конвертируем
+      const monthMap: Record<string, string> = {
+        'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+        'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+        'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+      };
+      if (monthMap[month.toLowerCase()]) {
+        month = monthMap[month.toLowerCase()];
+      } else {
+        month = month.padStart(2, '0');
+      }
+
+      result.issueDate = `${day}.${month}.${year}`;
       break;
     }
   }
 
-  // Извлекаем срок действия
+  // Извлекаем срок действия - более гибкие паттерны
   const validUntilPatterns = [
-    /(?:действительн[а-яё]*|срок[а-яё]*\s*действи[а-яё]*)[:\s]*(?:до|по)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-    /(?:по|до)\s*[«"«]?(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})[»"»]?\s*(?:года?|г\.?)?/i,
-    /сроком?\s+(?:на|до)\s+(\d+)\s*(?:год|лет|месяц)/i,
+    // "действует до 31.12.2024", "срок действия до 31.12.2024"
+    /(?:действ[а-яё]*|срок[а-яё]*\s*действ[а-яё]*)[:\s]*(?:до|по)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
+    // "по 31.12.2024", "до 31.12.2024"
+    /(?:по|до)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})[»""']?\s*(?:года?|г\.?)?/i,
+    // "до «31» декабря 2024"
+    /(?:до|по)\s*[«"„]?(\d{1,2})[»""'\s]+(\w+)\s+(\d{4})/i,
+    // Последняя дата в документе (обычно это дата окончания)
+    /(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})\s*(?:года?|г\.?)?\s*$/,
   ];
   for (const pattern of validUntilPatterns) {
-    const match = content.match(pattern);
-    if (match && match[1]) {
-      // Проверяем, что это дата, а не период
-      if (/\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}/.test(match[1])) {
-        result.validUntil = match[1].replace(/[-\/]/g, '.');
+    const match = normalizedContent.match(pattern);
+    if (match && match[1] && match[2] && match[3]) {
+      const day = match[1].padStart(2, '0');
+      let month = match[2];
+      const year = match[3].length === 2 ? '20' + match[3] : match[3];
+
+      const monthMap: Record<string, string> = {
+        'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+        'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+        'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+      };
+      if (monthMap[month.toLowerCase()]) {
+        month = monthMap[month.toLowerCase()];
+      } else if (/^\d+$/.test(month)) {
+        month = month.padStart(2, '0');
+      } else {
+        continue; // Не удалось распознать месяц
       }
-      break;
+
+      // Проверяем что это не та же дата что и дата выдачи
+      const candidateDate = `${day}.${month}.${year}`;
+      if (candidateDate !== result.issueDate) {
+        result.validUntil = candidateDate;
+        break;
+      }
     }
   }
 
@@ -383,8 +467,8 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
   const resultsMap = new Map();
 
   try {
-    // Делаем поиск по коллекции для получения содержимого всех документов
-    const response = await fetch('https://api.x.ai/v1/collections/search', {
+    // Используем правильный endpoint /v1/documents/search с правильным форматом запроса
+    const response = await fetch('https://api.x.ai/v1/documents/search', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -392,32 +476,42 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
       },
       body: JSON.stringify({
         query: 'доверенность уполномочивает представлять интересы подписывать',
-        collection_ids: [collectionId],
+        source: {
+          collection_ids: [collectionId]
+        },
+        retrieval_mode: {
+          type: 'hybrid'
+        },
+        max_num_results: 100,
         top_k: 100, // Получаем максимум результатов
       }),
     });
 
     if (!response.ok) {
-      console.error('Search all documents failed:', response.status);
+      const errorText = await response.text();
+      console.error('Search all documents failed:', response.status, errorText);
       return resultsMap;
     }
 
     const data = await response.json();
-    console.log(`Search returned ${data.results?.length || 0} results`);
+    // API может возвращать результаты в "matches" или "results"
+    const results = data.matches || data.results || [];
+    console.log(`Content search returned ${results.length} results`);
 
     // Логируем первый результат для отладки
-    if (data.results?.[0]) {
-      console.log('=== SEARCH RESULT DEBUG ===');
-      console.log('First search result:', JSON.stringify(data.results[0], null, 2));
-      console.log('Metadata:', JSON.stringify(data.results[0].metadata, null, 2));
-      console.log('=== END SEARCH DEBUG ===');
+    if (results[0]) {
+      console.log('=== CONTENT SEARCH RESULT DEBUG ===');
+      console.log('First search result keys:', Object.keys(results[0]));
+      console.log('First search result:', JSON.stringify(results[0], null, 2).substring(0, 1000));
+      console.log('=== END CONTENT SEARCH DEBUG ===');
     }
 
     // Обрабатываем каждый результат
-    for (const result of (data.results || [])) {
+    for (const result of results) {
       // Пробуем разные варианты получения file_id
-      const fileId = result.metadata?.file_id || result.file_id || result.document_id || result.id || '';
-      const content = result.content || result.text || '';
+      // API может возвращать file_id в разных полях
+      const fileId = result.file_id || result.metadata?.file_id || result.document_id || result.id || '';
+      const content = result.chunk_content || result.content || result.text || '';
 
       if (fileId && content) {
         const extracted = extractPoaFieldsFromContent(content);
@@ -446,10 +540,10 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
       }
     }
 
-    console.log(`Extracted data for ${resultsMap.size} unique documents`);
+    console.log(`Extracted data for ${resultsMap.size} unique documents from content search`);
     return resultsMap;
   } catch (error) {
-    console.error('Search all documents error:', error);
+    console.error('Search all documents content error:', error);
     return resultsMap;
   }
 }
@@ -509,7 +603,8 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const hasMore = data.has_more || (documents.length === limit);
       if (hasMore && documents.length > 0) {
         // Используем ID последнего документа как курсор
-        cursor = documents[documents.length - 1].id || documents[documents.length - 1].file_id;
+        const lastDoc = documents[documents.length - 1];
+        cursor = lastDoc.file_id || lastDoc.id || lastDoc.document_id;
       } else {
         cursor = null;
       }
@@ -542,32 +637,60 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     console.log('Searching all documents content for metadata extraction...');
     const contentDataMap = await searchAllDocumentsContent(apiKey, collectionId);
 
+    // Создаём дополнительный map по document id для поиска контента
+    // Это нужно потому что API может возвращать разные ID в разных ответах
+    const contentDataByDocId = new Map(contentDataMap);
+
     // Обогащаем документы информацией из Files API и содержимого документов
     const enrichedDocuments = await Promise.all(
       allDocuments.map(async (doc: any, index: number) => {
         // Пробуем разные варианты получения file_id
-        const fileId = doc.file_id || doc.id || doc.document_id || '';
+        // Приоритет: file_id > id > document_id
+        // Также проверяем вложенные поля
+        const fileId = doc.file_id || doc.id || doc.document_id ||
+                       doc.metadata?.file_id || doc.fields?.file_id || '';
 
-        if (index === 0) {
+        if (index < 3) {
           console.log(`Document ${index} - file_id sources:`, {
-            file_id: doc.file_id,
-            id: doc.id,
-            document_id: doc.document_id,
+            'doc.file_id': doc.file_id,
+            'doc.id': doc.id,
+            'doc.document_id': doc.document_id,
+            'metadata.file_id': doc.metadata?.file_id,
+            'fields.file_id': doc.fields?.file_id,
             final: fileId
           });
         }
 
-        // Пробуем получить имя из документа коллекции
-        let fileName = doc.name || doc.file_name || doc.filename || doc.fields?.file_name || doc.metadata?.file_name || '';
+        // Пробуем получить имя из документа коллекции - проверяем все возможные поля
+        let fileName = doc.name || doc.file_name || doc.filename ||
+                       doc.fields?.file_name || doc.fields?.name || doc.fields?.filename ||
+                       doc.metadata?.file_name || doc.metadata?.name || doc.metadata?.filename ||
+                       doc.original_filename || '';
         let createdAt = doc.created_at ? new Date(doc.created_at * 1000).toLocaleDateString('ru-RU') : '';
+
+        if (index < 3) {
+          console.log(`Document ${index} - fileName sources:`, {
+            'doc.name': doc.name,
+            'doc.file_name': doc.file_name,
+            'doc.filename': doc.filename,
+            'fields.file_name': doc.fields?.file_name,
+            'metadata.file_name': doc.metadata?.file_name,
+            final: fileName
+          });
+        }
 
         // Если имя файла отсутствует или это просто "Документ", запрашиваем через Files API
         if (!fileName || fileName === 'Документ') {
-          const fileInfo = await getFileInfo(apiKey, fileId);
-          if (fileInfo) {
-            fileName = fileInfo.filename || '';
-            if (!createdAt && fileInfo.createdAt) {
-              createdAt = fileInfo.createdAt;
+          if (fileId) {
+            const fileInfo = await getFileInfo(apiKey, fileId);
+            if (fileInfo) {
+              fileName = fileInfo.filename || '';
+              if (!createdAt && fileInfo.createdAt) {
+                createdAt = fileInfo.createdAt;
+              }
+              if (index < 3) {
+                console.log(`Document ${index} - Got fileName from Files API:`, fileName);
+              }
             }
           }
         }
@@ -576,14 +699,22 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         let { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
 
         // Если данные не извлечены из названия файла - используем данные из содержимого
-        const contentData = contentDataMap.get(fileId);
-        if (index === 0) {
+        // Пробуем найти по file_id, затем по doc.id
+        let contentData = contentDataMap.get(fileId);
+        if (!contentData && doc.id && doc.id !== fileId) {
+          contentData = contentDataByDocId.get(doc.id);
+        }
+
+        if (index < 3) {
           console.log(`Document ${index} - contentData lookup:`, {
             fileId,
+            docId: doc.id,
             hasContentData: !!contentData,
+            contentDataMapSize: contentDataMap.size,
             contentDataMapKeys: Array.from(contentDataMap.keys()).slice(0, 5)
           });
         }
+
         if (contentData) {
           if (fio === 'Не указано' && contentData.fio !== 'Не указано') {
             fio = contentData.fio;
@@ -617,10 +748,12 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
 
       // Добавляем извлечённые поля напрямую в формат данных для Grok
-      // Включаем готовую ссылку на скачивание
-      const downloadLink = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}` : '';
+      // ВАЖНО: Всегда генерируем ссылку если есть fileId
+      const downloadLink = doc.fileId
+        ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
+        : '/api/download?error=no_file_id';
 
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId} | Ссылка: ${downloadLink}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId || 'отсутствует'} | Ссылка: ${downloadLink}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
     }).join('\n');
 
     // Логируем первые 3 документа для отладки
