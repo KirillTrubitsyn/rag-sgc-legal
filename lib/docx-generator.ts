@@ -111,22 +111,134 @@ function extractSources(text: string): { cleanText: string; sources: string[] } 
 }
 
 /**
+ * Парсит markdown таблицу и создаёт DOCX Table
+ */
+function parseMarkdownTable(lines: string[], startIndex: number): { table: Table | null; endIndex: number } {
+  const tableLines: string[] = [];
+  let i = startIndex;
+
+  // Собираем все строки таблицы
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    // Строка таблицы должна начинаться и заканчиваться на |
+    if (line.startsWith('|') && line.includes('|')) {
+      tableLines.push(line);
+      i++;
+    } else if (tableLines.length > 0) {
+      // Таблица закончилась
+      break;
+    } else {
+      // Не таблица
+      return { table: null, endIndex: startIndex };
+    }
+  }
+
+  if (tableLines.length < 2) {
+    return { table: null, endIndex: startIndex };
+  }
+
+  // Парсим строки таблицы
+  const rows: string[][] = [];
+  let isHeader = true;
+
+  for (const line of tableLines) {
+    // Убираем первый и последний |
+    const content = line.slice(1, -1);
+    const cells = content.split('|').map(cell => cell.trim());
+
+    // Пропускаем строку-разделитель (|---|---|)
+    if (cells.every(cell => /^[-:]+$/.test(cell))) {
+      isHeader = false;
+      continue;
+    }
+
+    rows.push(cells);
+  }
+
+  if (rows.length === 0) {
+    return { table: null, endIndex: startIndex };
+  }
+
+  // Создаём DOCX таблицу
+  const tableRows: TableRow[] = rows.map((cells, rowIndex) => {
+    const isHeaderRow = rowIndex === 0;
+
+    return new TableRow({
+      children: cells.map(cellText => {
+        // Обрабатываем ссылки в ячейках: [текст](url) -> текст
+        const cleanText = cellText.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+        return new TableCell({
+          children: [
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: cleanText,
+                  bold: isHeaderRow,
+                  font: FONT_NAME,
+                  size: FONT_SIZE_NORMAL,
+                }),
+              ],
+              alignment: AlignmentType.LEFT,
+            }),
+          ],
+          verticalAlign: VerticalAlign.CENTER,
+          shading: isHeaderRow ? {
+            fill: 'F5F5F5', // Светло-серый фон для заголовка
+          } : undefined,
+        });
+      }),
+    });
+  });
+
+  const table = new Table({
+    width: {
+      size: 100,
+      type: WidthType.PERCENTAGE,
+    },
+    rows: tableRows,
+  });
+
+  return { table, endIndex: i };
+}
+
+/**
  * Парсит текст и создаёт массив параграфов
  */
-function parseTextToParagraphs(text: string): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
+function parseTextToParagraphs(text: string): (Paragraph | Table)[] {
+  const elements: (Paragraph | Table)[] = [];
   const lines = text.split('\n');
   let currentParagraphText = '';
+  let i = 0;
 
-  for (const line of lines) {
+  while (i < lines.length) {
+    const line = lines[i];
     const stripped = line.trim();
+
+    // Проверяем, начинается ли таблица
+    if (stripped.startsWith('|') && stripped.includes('|')) {
+      // Завершаем текущий параграф перед таблицей
+      if (currentParagraphText) {
+        elements.push(createBodyParagraph(currentParagraphText));
+        currentParagraphText = '';
+      }
+
+      // Парсим таблицу
+      const { table, endIndex } = parseMarkdownTable(lines, i);
+      if (table) {
+        elements.push(table);
+        i = endIndex;
+        continue;
+      }
+    }
 
     if (!stripped) {
       // Пустая строка - завершаем текущий параграф
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
+      i++;
       continue;
     }
 
@@ -134,10 +246,11 @@ function parseTextToParagraphs(text: string): Paragraph[] {
     const letterSectionMatch = stripped.match(/^([A-ZА-Я])\.\s+([^#].*)$/);
     if (letterSectionMatch && stripped.length < 100 && !stripped.includes('#')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createHeadingParagraph(stripped, true));
+      elements.push(createHeadingParagraph(stripped, true));
+      i++;
       continue;
     }
 
@@ -145,92 +258,100 @@ function parseTextToParagraphs(text: string): Paragraph[] {
     const sectionMatch = stripped.match(/^(\d+(?:\.\d+)?)\.\s+([А-ЯA-Z].*)$/);
     if (sectionMatch && stripped.length < 100) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
       const isSubsection = sectionMatch[1].includes('.');
-      paragraphs.push(createHeadingParagraph(stripped, !isSubsection));
+      elements.push(createHeadingParagraph(stripped, !isSubsection));
+      i++;
       continue;
     }
 
     // Markdown заголовки (##, ###, ####)
     if (stripped.startsWith('#### ')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createHeadingParagraph(stripped.slice(5), false));
+      elements.push(createHeadingParagraph(stripped.slice(5), false));
+      i++;
       continue;
     }
     if (stripped.startsWith('### ')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createHeadingParagraph(stripped.slice(4), false));
+      elements.push(createHeadingParagraph(stripped.slice(4), false));
+      i++;
       continue;
     }
     if (stripped.startsWith('## ')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createHeadingParagraph(stripped.slice(3), true));
+      elements.push(createHeadingParagraph(stripped.slice(3), true));
+      i++;
       continue;
     }
     if (stripped.startsWith('# ')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createHeadingParagraph(stripped.slice(2), true));
+      elements.push(createHeadingParagraph(stripped.slice(2), true));
+      i++;
       continue;
     }
 
     // Маркированные списки
     if (stripped.startsWith('- ') || stripped.startsWith('• ') || stripped.startsWith('* ')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createBulletParagraph(stripped.slice(2)));
+      elements.push(createBulletParagraph(stripped.slice(2)));
+      i++;
       continue;
     }
 
     // Цитаты (строки начинающиеся с ">")
     if (stripped.startsWith('> ') || stripped.startsWith('>')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
       const quoteContent = stripped.replace(/^>\s*/, '');
 
       // Проверяем, является ли это строкой источника внутри blockquote
       if (quoteContent.startsWith('—') || quoteContent.startsWith('― ') || quoteContent.startsWith('- ')) {
-        paragraphs.push(createQuoteSourceParagraph(quoteContent));
+        elements.push(createQuoteSourceParagraph(quoteContent));
         // Добавляем пустой параграф для разрыва между блоками цитат
-        paragraphs.push(new Paragraph({
+        elements.push(new Paragraph({
           children: [],
           spacing: { before: 160, after: 160 },
         }));
       } else {
-        paragraphs.push(createQuoteParagraph(quoteContent));
+        elements.push(createQuoteParagraph(quoteContent));
       }
+      i++;
       continue;
     }
 
     // Источник цитаты (строки начинающиеся с "—", "― ", или "«—")
     if (stripped.startsWith('—') || stripped.startsWith('― ') || stripped.startsWith('«—')) {
       if (currentParagraphText) {
-        paragraphs.push(createBodyParagraph(currentParagraphText));
+        elements.push(createBodyParagraph(currentParagraphText));
         currentParagraphText = '';
       }
-      paragraphs.push(createQuoteSourceParagraph(stripped));
+      elements.push(createQuoteSourceParagraph(stripped));
       // Добавляем пустой параграф БЕЗ линии для разрыва между блоками цитат
-      paragraphs.push(new Paragraph({
+      elements.push(new Paragraph({
         children: [],
         spacing: { before: 160, after: 160 },
       }));
+      i++;
       continue;
     }
 
@@ -247,10 +368,11 @@ function parseTextToParagraphs(text: string): Paragraph[] {
       const words = stripped.split(' ');
       if (words.length <= 6 && words.slice(0, -1).every(w => !w.endsWith(','))) {
         if (currentParagraphText) {
-          paragraphs.push(createBodyParagraph(currentParagraphText));
+          elements.push(createBodyParagraph(currentParagraphText));
           currentParagraphText = '';
         }
-        paragraphs.push(createHeadingParagraph(stripped, false));
+        elements.push(createHeadingParagraph(stripped, false));
+        i++;
         continue;
       }
     }
@@ -261,14 +383,15 @@ function parseTextToParagraphs(text: string): Paragraph[] {
     } else {
       currentParagraphText = stripped;
     }
+    i++;
   }
 
   // Добавляем последний параграф
   if (currentParagraphText) {
-    paragraphs.push(createBodyParagraph(currentParagraphText));
+    elements.push(createBodyParagraph(currentParagraphText));
   }
 
-  return paragraphs;
+  return elements;
 }
 
 /**
@@ -675,8 +798,8 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
     );
   }
 
-  // Парсим основной текст
-  const contentParagraphs = parseTextToParagraphs(cleanText);
+  // Парсим основной текст (может содержать таблицы)
+  const contentElements = parseTextToParagraphs(cleanText);
 
   // Создаём секцию источников (если есть)
   const sourcesParagraphs = sources.length > 0 ? createSourcesSection(sources) : [];
@@ -685,10 +808,10 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
   const footerParagraphs = createDocumentFooter(createdAt);
 
   // Собираем все элементы документа
-  const allElements = [
+  const allElements: (Paragraph | Table)[] = [
     ...titleElements,
     ...titleParagraphs,
-    ...contentParagraphs,
+    ...contentElements,
     ...sourcesParagraphs,
     ...footerParagraphs,
   ];
