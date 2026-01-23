@@ -143,6 +143,43 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция извлечения ФИО и номера доверенности из названия файла
+// Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.).pdf", "ТГК-13-2024-001 Иванов И.И..pdf"
+function extractPoaFieldsFromFilename(filename: string): { fio: string; poaNumber: string } {
+  const result = { fio: 'Не указано', poaNumber: 'Не указано' };
+
+  if (!filename || filename === 'Документ') {
+    return result;
+  }
+
+  // Извлекаем ФИО из скобок: (Мажирин О.Е.) или (Иванов Иван Иванович)
+  const fioInBrackets = filename.match(/\(([А-ЯЁа-яё][А-ЯЁа-яё\s.]+)\)/);
+  if (fioInBrackets && fioInBrackets[1]) {
+    result.fio = fioInBrackets[1].trim();
+  } else {
+    // Пробуем найти ФИО без скобок после номера: "КГ-24-127 Мажирин О.Е..pdf"
+    const fioAfterNumber = filename.match(/[А-ЯЁ]{2,}-\d{2,}-\d+\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.?)/);
+    if (fioAfterNumber && fioAfterNumber[1]) {
+      result.fio = fioAfterNumber[1].trim();
+    }
+  }
+
+  // Извлекаем номер доверенности
+  // Формат: КГ-24-127, ТГК-13-2024-001, СГК-24/123 и т.п.
+  const poaNumberMatch = filename.match(/([А-ЯЁ]{2,}-\d{2,}-\d+(?:[-\/]\d+)?)/i);
+  if (poaNumberMatch && poaNumberMatch[1]) {
+    result.poaNumber = poaNumberMatch[1].toUpperCase();
+  } else {
+    // Пробуем найти простой номер: "№123" или "123-2024"
+    const simpleNumber = filename.match(/№?\s*(\d+[-\/]?\d*)/);
+    if (simpleNumber && simpleNumber[1]) {
+      result.poaNumber = simpleNumber[1];
+    }
+  }
+
+  return result;
+}
+
 // Функция получения информации о файле через Files API
 async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string } | null> {
   try {
@@ -264,20 +301,26 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           }
         }
 
+        // Извлекаем ФИО и номер доверенности из названия файла
+        const { fio, poaNumber } = extractPoaFieldsFromFilename(fileName);
+
         return {
           fileName: fileName || 'Документ',
           fileId,
           createdAt,
-          size: doc.size
+          size: doc.size,
+          fio,
+          poaNumber
         };
       })
     );
 
-    // Форматируем список документов
+    // Форматируем список документов с предварительно извлечёнными полями
     const formattedResults = enrichedDocuments.map((doc, i: number) => {
       const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
 
-      return `[${i + 1}] ${doc.fileName} (file_id: ${doc.fileId}${doc.createdAt ? `, загружен: ${doc.createdAt}` : ''}${sizeStr ? `, размер: ${sizeStr}` : ''})`;
+      // Добавляем извлечённые поля напрямую в формат данных для Grok
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | file_id: ${doc.fileId}${doc.createdAt ? ` | Загружен: ${doc.createdAt}` : ''}${sizeStr ? ` | Размер: ${sizeStr}` : ''}`;
     }).join('\n');
 
     // Добавляем итоговую информацию
