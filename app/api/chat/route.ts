@@ -1298,12 +1298,17 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
 
     // Форматируем результаты
+    // ВАЖНО: Создаём готовую markdown-ссылку с закодированным URL
+    // чтобы AI могла просто скопировать её в таблицу без модификации
     const formattedResults = filteredDocuments.map((doc, i) => {
-      const downloadLink = doc.fileId
-        ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = doc.fileId
+        ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}`
         : '';
+      // Готовая markdown-ссылка для копирования в таблицу
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : 'Нет ссылки';
 
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId || 'отсутствует'} | Ссылка: ${downloadLink}`;
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | Скачать: ${markdownLink}`;
     }).join('\n');
 
     console.log('=== FORMATTED DOCUMENTS PREVIEW ===');
@@ -1422,12 +1427,17 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
     console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
 
     // Форматируем результаты
+    // ВАЖНО: Создаём готовую markdown-ссылку с закодированным URL
+    // чтобы AI могла просто скопировать её в таблицу без модификации
     const formattedResults = filteredDocuments.map((doc, i) => {
-      const downloadLink = doc.fileId
-        ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = doc.fileId
+        ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}`
         : '';
+      // Готовая markdown-ссылка для копирования в таблицу
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : 'Нет ссылки';
 
-      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId || 'отсутствует'} | Ссылка: ${downloadLink}`;
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | Скачать: ${markdownLink}`;
     }).join('\n');
 
     const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${filteredDocuments.length}`;
@@ -1655,7 +1665,7 @@ if (isListAll) {
 
       const collectionName = collectionConfig?.displayName || 'документов';
       contextSection = documentResults
-        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}`
+        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}\n\nВАЖНО ПРО ССЫЛКИ: Поле "Скачать:" уже содержит ГОТОВУЮ markdown-ссылку [Скачать](URL). КОПИРУЙ её в таблицу ДОСЛОВНО, без изменений!`
         : `\n\nВ базе данных "${collectionName}" нет документов.`;
     } else {
       // Для обычных запросов - используем поиск
