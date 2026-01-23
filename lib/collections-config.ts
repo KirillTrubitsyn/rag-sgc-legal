@@ -18,6 +18,10 @@ export interface CollectionConfig {
   displayName: string;
   // Описание коллекции
   description: string;
+  // Использовать полный текст документа вместо чанков (для небольших документов)
+  useFullContent?: boolean;
+  // Примерный размер документа в токенах (для оценки загрузки)
+  maxTokensPerDoc?: number;
 }
 
 /**
@@ -31,6 +35,8 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Доверенности',
     description: 'Доверенности и полномочия сотрудников группы СГК',
     priority: 10, // Высокий приоритет - проверяется первым
+    useFullContent: true, // Скачивать полный текст документа вместо чанков
+    maxTokensPerDoc: 3000, // Примерный размер доверенности в токенах
     keywords: [
       // Основные термины
       'доверенност', 'полномочи', 'уполномоч', 'представител',
@@ -73,6 +79,8 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Формы договоров',
     description: 'Шаблоны и формы типовых договоров',
     priority: 5,
+    useFullContent: true, // Шаблоны обычно небольшие - загружать целиком
+    maxTokensPerDoc: 5000,
     keywords: [
       'форма договор', 'шаблон договор', 'бланк договор', 'типовой договор',
       'образец договор', 'форма контракт', 'шаблон контракт',
@@ -89,6 +97,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Нормативные документы',
     description: 'Общая коллекция нормативных документов и стандартов СГК',
     priority: -1, // Самый низкий приоритет - используется как fallback
+    useFullContent: false, // Большие документы - использовать чанки
     keywords: [], // Пустой массив = используется по умолчанию
   },
 };
