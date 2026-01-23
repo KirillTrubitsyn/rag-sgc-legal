@@ -1,4 +1,4 @@
-import { legalSystemPrompt, poaSystemPrompt, getSystemPromptForCollection } from '@/lib/grok-client';
+import { legalSystemPrompt, poaSystemPrompt, uploadedDocumentSystemPrompt, getSystemPromptForCollection } from '@/lib/grok-client';
 import {
   detectCollection,
   isListAllQuery,
@@ -16,6 +16,13 @@ interface QueryAnalysis {
   isListAll: boolean;         // Запрос на полный список документов
   collectionId: string;       // ID коллекции из env
   systemPrompt: string;       // Системный промпт для коллекции
+}
+
+// Проверка, содержит ли сообщение загруженные документы
+function hasUploadedDocuments(messages: any[]): boolean {
+  const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+  if (!lastUserMessage) return false;
+  return lastUserMessage.content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
 }
 
 // Анализ запроса пользователя и определение коллекции
@@ -260,6 +267,77 @@ function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): s
   return combinedQuery;
 }
 
+// Функция для создания streaming response
+function createStreamResponse(response: Response): Response {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let chunkCount = 0;
+  let buffer = '';
+
+  const transformStream = new TransformStream({
+    transform(chunk, controller) {
+      const text = decoder.decode(chunk, { stream: true });
+
+      buffer += text;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+
+        if (trimmedLine.startsWith('data: ')) {
+          const data = trimmedLine.slice(6).trim();
+
+          if (data === '[DONE]') {
+            console.log('Stream done, total chunks:', chunkCount);
+            controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+            const content = json.choices?.[0]?.delta?.content;
+
+            if (content) {
+              chunkCount++;
+              controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+            }
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+    },
+    flush(controller) {
+      if (buffer.trim()) {
+        const trimmedLine = buffer.trim();
+        if (trimmedLine.startsWith('data: ')) {
+          const data = trimmedLine.slice(6).trim();
+          if (data !== '[DONE]') {
+            try {
+              const json = JSON.parse(data);
+              const content = json.choices?.[0]?.delta?.content;
+              if (content) {
+                controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+      }
+      console.log('Stream flush, sending finish');
+      controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+    }
+  });
+
+  return new Response(response.body?.pipeThrough(transformStream), {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+    },
+  });
+}
+
 export async function POST(req: Request) {
   console.log('=== Chat API called ===');
 
@@ -279,6 +357,52 @@ export async function POST(req: Request) {
 
     // Анализируем запрос и определяем коллекцию
     const queryAnalysis = analyzeQuery(messages);
+
+// Проверяем загруженные документы в первую очередь
+    const isUploadedDocumentRequest = hasUploadedDocuments(messages);
+
+    if (isUploadedDocumentRequest) {
+      console.log('Using uploaded document mode - no collection search');
+
+      // Для загруженных документов используем специальный промпт
+      const systemPromptWithContext = uploadedDocumentSystemPrompt +
+        '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в сообщении пользователя.';
+
+      const apiMessages = messages.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      console.log('Calling xAI Chat API for uploaded documents...');
+
+      const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'grok-3-fast',
+          messages: [
+            { role: 'system', content: systemPromptWithContext },
+            ...apiMessages,
+          ],
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('xAI API error:', errorText);
+        return new Response(
+          JSON.stringify({ error: 'xAI API error', details: errorText }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Используем общую трансформацию потока
+      return createStreamResponse(response);
+    }
 
     if (!queryAnalysis) {
       console.error('No collection configured');
@@ -302,7 +426,7 @@ export async function POST(req: Request) {
     let documentResults: string;
     let contextSection: string;
 
-    if (isListAll) {
+if (isListAll) {
       // Для запросов о полном списке - получаем ВСЕ документы из коллекции
       console.log('Fetching ALL documents from collection...');
       documentResults = await getAllDocuments(apiKey, collectionId);
@@ -360,74 +484,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Трансформируем xAI SSE в формат AI SDK
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    let chunkCount = 0;
-    let buffer = '';
-
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        const text = decoder.decode(chunk, { stream: true });
-
-        buffer += text;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-
-          if (trimmedLine.startsWith('data: ')) {
-            const data = trimmedLine.slice(6).trim();
-
-            if (data === '[DONE]') {
-              console.log('Stream done, total chunks:', chunkCount);
-              controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
-              return;
-            }
-
-            try {
-              const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content;
-
-              if (content) {
-                chunkCount++;
-                controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      },
-      flush(controller) {
-        if (buffer.trim()) {
-          const trimmedLine = buffer.trim();
-          if (trimmedLine.startsWith('data: ')) {
-            const data = trimmedLine.slice(6).trim();
-            if (data !== '[DONE]') {
-              try {
-                const json = JSON.parse(data);
-                const content = json.choices?.[0]?.delta?.content;
-                if (content) {
-                  controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
-                }
-              } catch (e) {
-                // ignore
-              }
-            }
-          }
-        }
-        console.log('Stream flush, sending finish');
-        controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
-      }
-    });
-
-    return new Response(response.body?.pipeThrough(transformStream), {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-      },
-    });
+    return createStreamResponse(response);
 
   } catch (error) {
     console.error('Chat API error:', error);

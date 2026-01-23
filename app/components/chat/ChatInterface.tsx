@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
 import { exportToDocx } from '@/lib/docx-generator';
+import { FileUploadResult, PhotoItem, MAX_PHOTOS } from '@/lib/file-types';
+import FilePreview from './FilePreview';
+import PhotoPreview from './PhotoPreview';
+import { FileButton, CameraButton } from './UploadButtons';
 
 // Компонент для отображения блока "Ответ по существу"
 function SummaryBlock({ text }: { text: string }) {
@@ -261,16 +265,154 @@ function StructuredResponse({ content }: { content: string }) {
   );
 }
 
+// Функция загрузки файла на сервер
+async function uploadFile(file: File): Promise<FileUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Ошибка загрузки файла');
+  }
+
+  return res.json();
+}
+
 export default function ChatInterface() {
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
     api: '/api/chat',
   });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
+  // Состояния для загруженных документов
+  const [uploadedFiles, setUploadedFiles] = useState<FileUploadResult[]>([]);
+  const [capturedPhotos, setCapturedPhotos] = useState<PhotoItem[]>([]);
+
   const handleNewQuery = () => {
     setMessages([]);
     setInput('');
+    setUploadedFiles([]);
+    setCapturedPhotos([]);
   };
+
+  // Обработчик загрузки файла
+  const handleFileProcessed = useCallback((result: FileUploadResult) => {
+    if (result.success) {
+      setUploadedFiles(prev => [...prev, result]);
+    }
+  }, []);
+
+  // Обработчик удаления файла
+  const handleRemoveFile = useCallback((index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Обработчик захвата фото с камеры
+  const handlePhotoCapture = useCallback(async (file: File) => {
+    // Добавляем фото в состояние с флагом обработки
+    const preview = URL.createObjectURL(file);
+    const newPhoto: PhotoItem = {
+      file,
+      preview,
+      isProcessing: true,
+    };
+
+    setCapturedPhotos(prev => [...prev, newPhoto]);
+
+    // Отправляем на OCR
+    try {
+      const result = await uploadFile(file);
+      setCapturedPhotos(prev =>
+        prev.map(p =>
+          p.preview === preview
+            ? { ...p, result, isProcessing: false }
+            : p
+        )
+      );
+    } catch (err) {
+      setCapturedPhotos(prev =>
+        prev.map(p =>
+          p.preview === preview
+            ? { ...p, error: err instanceof Error ? err.message : 'Ошибка распознавания', isProcessing: false }
+            : p
+        )
+      );
+    }
+  }, []);
+
+  // Обработчик удаления фото
+  const handleRemovePhoto = useCallback((index: number) => {
+    setCapturedPhotos(prev => {
+      const photo = prev[index];
+      if (photo?.preview) {
+        URL.revokeObjectURL(photo.preview);
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  }, []);
+
+  // Формирование контекста документов для отправки
+  const getDocumentContext = useCallback(() => {
+    const contexts: string[] = [];
+
+    // Добавляем загруженные файлы
+    uploadedFiles.forEach(file => {
+      if (file.extracted_text) {
+        contexts.push(`--- ЗАГРУЖЕННЫЙ ДОКУМЕНТ: ${file.filename} ---\n${file.extracted_text}\n--- КОНЕЦ ДОКУМЕНТА ---`);
+      }
+    });
+
+    // Добавляем распознанные фото
+    capturedPhotos.forEach((photo, idx) => {
+      if (photo.result?.extracted_text) {
+        contexts.push(`--- ФОТО ДОКУМЕНТА ${idx + 1} ---\n${photo.result.extracted_text}\n--- КОНЕЦ ФОТО ---`);
+      }
+    });
+
+    return contexts.join('\n\n');
+  }, [uploadedFiles, capturedPhotos]);
+
+  // Кастомный обработчик отправки сообщения
+  const handleCustomSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+
+    const documentContext = getDocumentContext();
+
+    if (documentContext) {
+      // Если есть документы, добавляем их в начало сообщения
+      const messageWithContext = `[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]\n${documentContext}\n[КОНЕЦ ЗАГРУЖЕННЫХ ДОКУМЕНТОВ]\n\nВОПРОС ПОЛЬЗОВАТЕЛЯ: ${input}`;
+
+      // Очищаем загруженные файлы после отправки
+      setUploadedFiles([]);
+      setCapturedPhotos([]);
+
+      // Создаем событие с модифицированным input
+      const fakeEvent = {
+        ...e,
+        preventDefault: () => {},
+      } as React.FormEvent;
+
+      // Временно меняем input и отправляем
+      setInput(messageWithContext);
+
+      // Используем setTimeout чтобы дать React обновить state
+      setTimeout(() => {
+        handleSubmit(fakeEvent);
+      }, 0);
+    } else {
+      // Если нет документов, отправляем как обычно
+      handleSubmit(e);
+    }
+  }, [input, getDocumentContext, handleSubmit, setInput]);
+
+  // Проверяем, есть ли документы для отправки
+  const hasDocuments = uploadedFiles.length > 0 || capturedPhotos.some(p => p.result);
+  const isProcessingPhotos = capturedPhotos.some(p => p.isProcessing);
 
   // Функция для получения вопроса пользователя для данного ответа ассистента
   const getQuestionForAssistant = (messageIndex: number): string => {
@@ -343,6 +485,10 @@ export default function ChatInterface() {
               <p className="text-sgc-blue-500/50 text-sm max-w-md">
                 Задайте вопрос, и система найдёт релевантную информацию в базе документов.
               </p>
+              <div className="mt-6 flex items-center gap-2 text-sgc-blue-500/40 text-xs">
+                <Upload className="w-4 h-4" />
+                <span>Вы можете загрузить документ для анализа</span>
+              </div>
             </div>
           ) : (
             // Messages
@@ -489,37 +635,81 @@ export default function ChatInterface() {
 
       {/* Input Form */}
       <div className="bg-white border-t border-slate-200 px-4 py-4 sm:px-6 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={input}
-              onChange={handleInputChange}
-              placeholder="Задайте вопрос о документах..."
-              disabled={isLoading}
-              className={cn(
-                'flex-1 rounded-xl border border-slate-200 px-4 py-3',
-                'focus:outline-none sgc-input',
-                'disabled:bg-slate-50 disabled:cursor-not-allowed',
-                'text-sgc-blue-500 placeholder-slate-400',
-                'transition-all duration-200'
-              )}
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className={cn(
-                'inline-flex items-center justify-center',
-                'rounded-xl px-5 py-3',
-                'text-white font-medium',
-                'sgc-btn-primary',
-                'focus:outline-none focus:ring-2 focus:ring-sgc-orange-500 focus:ring-offset-2'
-              )}
-            >
-              <Send className="w-5 h-5" />
-            </button>
-          </div>
-        </form>
+        <div className="max-w-4xl mx-auto">
+          {/* Превью загруженных файлов */}
+          {uploadedFiles.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {uploadedFiles.map((file, idx) => (
+                <FilePreview
+                  key={`${file.filename}-${idx}`}
+                  file={file}
+                  onRemove={() => handleRemoveFile(idx)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Превью фото документов */}
+          <PhotoPreview
+            photos={capturedPhotos}
+            onRemove={handleRemovePhoto}
+            maxPhotos={MAX_PHOTOS}
+          />
+
+          {/* Индикатор наличия документов */}
+          {hasDocuments && (
+            <div className="mb-2 text-xs text-sgc-orange-500 flex items-center gap-1">
+              <FileText className="w-3 h-3" />
+              <span>Документы будут использованы для ответа на ваш вопрос</span>
+            </div>
+          )}
+
+          <form onSubmit={handleCustomSubmit}>
+            <div className="flex gap-2 sm:gap-3 items-center">
+              {/* Кнопки загрузки */}
+              <div className="flex items-center gap-1">
+                <FileButton
+                  onFileProcessed={handleFileProcessed}
+                  disabled={isLoading}
+                />
+                <CameraButton
+                  onCapture={handlePhotoCapture}
+                  disabled={isLoading}
+                  maxPhotos={MAX_PHOTOS}
+                  currentPhotoCount={capturedPhotos.length}
+                />
+              </div>
+
+              <input
+                type="text"
+                value={input}
+                onChange={handleInputChange}
+                placeholder={hasDocuments ? "Задайте вопрос по загруженным документам..." : "Задайте вопрос о документах..."}
+                disabled={isLoading}
+                className={cn(
+                  'flex-1 rounded-xl border border-slate-200 px-4 py-3',
+                  'focus:outline-none sgc-input',
+                  'disabled:bg-slate-50 disabled:cursor-not-allowed',
+                  'text-sgc-blue-500 placeholder-slate-400',
+                  'transition-all duration-200'
+                )}
+              />
+              <button
+                type="submit"
+                disabled={isLoading || isProcessingPhotos || (!input.trim() && !hasDocuments)}
+                className={cn(
+                  'inline-flex items-center justify-center',
+                  'rounded-xl px-5 py-3',
+                  'text-white font-medium',
+                  'sgc-btn-primary',
+                  'focus:outline-none focus:ring-2 focus:ring-sgc-orange-500 focus:ring-offset-2'
+                )}
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+          </form>
+        </div>
         <p className="text-center text-xs text-sgc-blue-500/40 mt-2">
           Разработка @Кирилл Трубицын
         </p>
