@@ -27,6 +27,26 @@ function SummaryBlock({ text }: { text: string }) {
           li: ({ children }) => <li className="ml-2 text-sgc-blue-500">{children}</li>,
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
+          // Компонент для ссылок
+          a: ({ href, children }) => {
+            const isDownloadLink = href?.includes('/api/download');
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "inline-flex items-center gap-1 transition-colors",
+                  isDownloadLink
+                    ? "text-sgc-orange-600 hover:text-sgc-orange-700 underline decoration-sgc-orange-300"
+                    : "text-sgc-blue-600 hover:text-sgc-blue-700 underline"
+                )}
+              >
+                {isDownloadLink && <Download className="w-3.5 h-3.5" />}
+                {children}
+              </a>
+            );
+          },
           // Компоненты для таблиц
           table: ({ children }) => (
             <div className="my-4 overflow-x-auto rounded-lg border border-sgc-blue-200 shadow-sm">
@@ -164,6 +184,26 @@ function StructuredResponse({ content }: { content: string }) {
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
           code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
+          // Компонент для ссылок
+          a: ({ href, children }) => {
+            const isDownloadLink = href?.includes('/api/download');
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "inline-flex items-center gap-1 transition-colors",
+                  isDownloadLink
+                    ? "text-sgc-orange-600 hover:text-sgc-orange-700 underline decoration-sgc-orange-300"
+                    : "text-sgc-blue-600 hover:text-sgc-blue-700 underline"
+                )}
+              >
+                {isDownloadLink && <Download className="w-3.5 h-3.5" />}
+                {children}
+              </a>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
               {children}
