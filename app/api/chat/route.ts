@@ -718,6 +718,14 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
       if (documents.length === 0) break;
 
+      // Логируем структуру первого документа для отладки
+      if (allDocuments.length === 0 && documents.length > 0) {
+        console.log('=== LIST API FIRST DOCUMENT ===');
+        console.log('Keys:', Object.keys(documents[0]));
+        console.log('Full document:', JSON.stringify(documents[0], null, 2).substring(0, 1000));
+        console.log('=== END FIRST DOCUMENT ===');
+      }
+
       allDocuments = allDocuments.concat(documents);
 
       const hasMore = data.has_more || (documents.length === limit);
@@ -759,6 +767,8 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
     // Map для хранения контента по file_id
     const contentByFileId = new Map<string, string[]>();
+    // Map для хранения имен файлов из результатов поиска
+    const fileNamesByFileId = new Map<string, string>();
 
     for (const query of searchQueries) {
       const response = await fetch('https://api.x.ai/v1/documents/search', {
@@ -784,30 +794,47 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       for (const result of results) {
         const fileId = result.file_id || '';
         const content = result.chunk_content || result.content || result.text || '';
+        // Сохраняем имя файла из результатов поиска
+        const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
 
-        if (fileId && content) {
-          if (!contentByFileId.has(fileId)) {
-            contentByFileId.set(fileId, []);
+        if (fileId) {
+          // Сохраняем имя файла если его ещё нет
+          if (fileName && !fileNamesByFileId.has(fileId)) {
+            fileNamesByFileId.set(fileId, fileName);
           }
-          const chunks = contentByFileId.get(fileId)!;
-          if (!chunks.includes(content)) {
-            chunks.push(content);
+
+          // Сохраняем контент
+          if (content) {
+            if (!contentByFileId.has(fileId)) {
+              contentByFileId.set(fileId, []);
+            }
+            const chunks = contentByFileId.get(fileId)!;
+            if (!chunks.includes(content)) {
+              chunks.push(content);
+            }
           }
         }
       }
     }
 
     console.log(`Search collected content for ${contentByFileId.size} documents`);
+    console.log(`Search collected file names for ${fileNamesByFileId.size} documents`);
 
     // ШАГ 3: Обогащаем ВСЕ документы из list API данными из поиска
     const enrichedDocuments = await Promise.all(
       allDocuments.map(async (doc: any, index: number) => {
         const fileId = doc.file_id || doc.id || '';
 
-        // Получаем имя файла
+        // Получаем имя файла из разных источников
         let fileName = doc.name || doc.file_name || doc.filename ||
                        doc.fields?.file_name || doc.metadata?.file_name || '';
 
+        // Если нет имени - пробуем из результатов поиска
+        if (!fileName && fileId) {
+          fileName = fileNamesByFileId.get(fileId) || '';
+        }
+
+        // Если всё ещё нет - пробуем Files API
         if (!fileName && fileId) {
           const fileInfo = await getFileInfo(apiKey, fileId);
           if (fileInfo?.filename) {
