@@ -18,6 +18,7 @@ import {
   TableCell,
   WidthType,
   VerticalAlign,
+  PageOrientation,
 } from 'docx';
 import { saveAs } from 'file-saver';
 import { Packer } from 'docx';
@@ -111,9 +112,34 @@ function extractSources(text: string): { cleanText: string; sources: string[] } 
 }
 
 /**
- * Парсит markdown таблицу и создаёт DOCX Table
+ * Определяет индексы столбцов для удаления (например, "Скачать")
  */
-function parseMarkdownTable(lines: string[], startIndex: number): { table: Table | null; endIndex: number } {
+function getColumnsToRemove(headerCells: string[]): number[] {
+  const columnsToRemove: number[] = [];
+  const excludeHeaders = ['скачать', 'download', 'ссылка', 'link'];
+
+  headerCells.forEach((cell, index) => {
+    const cellLower = cell.toLowerCase().trim();
+    if (excludeHeaders.some(header => cellLower.includes(header))) {
+      columnsToRemove.push(index);
+    }
+  });
+
+  return columnsToRemove;
+}
+
+/**
+ * Удаляет указанные столбцы из строки таблицы
+ */
+function removeColumns(cells: string[], columnsToRemove: number[]): string[] {
+  return cells.filter((_, index) => !columnsToRemove.includes(index));
+}
+
+/**
+ * Парсит markdown таблицу и создаёт DOCX Table
+ * Автоматически убирает столбец "Скачать" при экспорте
+ */
+function parseMarkdownTable(lines: string[], startIndex: number): { table: Table | null; endIndex: number; columnCount: number } {
   const tableLines: string[] = [];
   let i = startIndex;
 
@@ -129,17 +155,17 @@ function parseMarkdownTable(lines: string[], startIndex: number): { table: Table
       break;
     } else {
       // Не таблица
-      return { table: null, endIndex: startIndex };
+      return { table: null, endIndex: startIndex, columnCount: 0 };
     }
   }
 
   if (tableLines.length < 2) {
-    return { table: null, endIndex: startIndex };
+    return { table: null, endIndex: startIndex, columnCount: 0 };
   }
 
   // Парсим строки таблицы
   const rows: string[][] = [];
-  let isHeader = true;
+  let columnsToRemove: number[] = [];
 
   for (const line of tableLines) {
     // Убираем первый и последний |
@@ -148,16 +174,24 @@ function parseMarkdownTable(lines: string[], startIndex: number): { table: Table
 
     // Пропускаем строку-разделитель (|---|---|)
     if (cells.every(cell => /^[-:]+$/.test(cell))) {
-      isHeader = false;
       continue;
     }
 
-    rows.push(cells);
+    // Для первой строки (заголовок) определяем столбцы для удаления
+    if (rows.length === 0) {
+      columnsToRemove = getColumnsToRemove(cells);
+    }
+
+    // Убираем столбцы со ссылками
+    const filteredCells = removeColumns(cells, columnsToRemove);
+    rows.push(filteredCells);
   }
 
   if (rows.length === 0) {
-    return { table: null, endIndex: startIndex };
+    return { table: null, endIndex: startIndex, columnCount: 0 };
   }
+
+  const columnCount = rows[0]?.length || 0;
 
   // Создаём DOCX таблицу
   const tableRows: TableRow[] = rows.map((cells, rowIndex) => {
@@ -199,17 +233,27 @@ function parseMarkdownTable(lines: string[], startIndex: number): { table: Table
     rows: tableRows,
   });
 
-  return { table, endIndex: i };
+  return { table, endIndex: i, columnCount };
+}
+
+/**
+ * Результат парсинга текста с информацией о таблицах
+ */
+interface ParsedContent {
+  elements: (Paragraph | Table)[];
+  maxTableColumns: number;
 }
 
 /**
  * Парсит текст и создаёт массив параграфов
+ * Возвращает также максимальное количество столбцов в таблицах
  */
-function parseTextToParagraphs(text: string): (Paragraph | Table)[] {
+function parseTextToParagraphs(text: string): ParsedContent {
   const elements: (Paragraph | Table)[] = [];
   const lines = text.split('\n');
   let currentParagraphText = '';
   let i = 0;
+  let maxTableColumns = 0;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -224,9 +268,13 @@ function parseTextToParagraphs(text: string): (Paragraph | Table)[] {
       }
 
       // Парсим таблицу
-      const { table, endIndex } = parseMarkdownTable(lines, i);
+      const { table, endIndex, columnCount } = parseMarkdownTable(lines, i);
       if (table) {
         elements.push(table);
+        // Отслеживаем максимальное количество столбцов
+        if (columnCount > maxTableColumns) {
+          maxTableColumns = columnCount;
+        }
         i = endIndex;
         continue;
       }
@@ -391,7 +439,7 @@ function parseTextToParagraphs(text: string): (Paragraph | Table)[] {
     elements.push(createBodyParagraph(currentParagraphText));
   }
 
-  return elements;
+  return { elements, maxTableColumns };
 }
 
 /**
@@ -799,7 +847,7 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
   }
 
   // Парсим основной текст (может содержать таблицы)
-  const contentElements = parseTextToParagraphs(cleanText);
+  const { elements: contentElements, maxTableColumns } = parseTextToParagraphs(cleanText);
 
   // Создаём секцию источников (если есть)
   const sourcesParagraphs = sources.length > 0 ? createSourcesSection(sources) : [];
@@ -816,6 +864,10 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
     ...footerParagraphs,
   ];
 
+  // Определяем ориентацию страницы
+  // Если таблица имеет 5+ столбцов - используем альбомную ориентацию
+  const useLandscape = maxTableColumns >= 5;
+
   // Создаём документ
   const doc = new Document({
     sections: [
@@ -828,6 +880,12 @@ export async function exportToDocx(options: ExportOptions): Promise<void> {
               bottom: MARGIN_BOTTOM,
               left: MARGIN_LEFT,
             },
+            // Альбомная ориентация для широких таблиц
+            ...(useLandscape ? {
+              size: {
+                orientation: PageOrientation.LANDSCAPE,
+              },
+            } : {}),
           },
         },
         footers: {

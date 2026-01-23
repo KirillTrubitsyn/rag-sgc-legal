@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload, Maximize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,8 +13,55 @@ import FilePreview from './FilePreview';
 import PhotoPreview from './PhotoPreview';
 import { FileButton, CameraButton } from './UploadButtons';
 
+// Компонент модального окна для полноэкранной таблицы
+function FullscreenTableModal({
+  isOpen,
+  onClose,
+  tableHtml
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  tableHtml: string;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-sgc-blue-200 bg-gradient-to-r from-sgc-blue-500 to-sgc-blue-600">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Maximize2 className="w-5 h-5" />
+            Таблица (альбомный вид)
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Table content - rotated for landscape view */}
+        <div className="flex-1 overflow-auto p-6">
+          <div
+            className="fullscreen-table-content"
+            dangerouslySetInnerHTML={{ __html: tableHtml }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Компонент для отображения блока "Ответ по существу"
-function SummaryBlock({ text }: { text: string }) {
+function SummaryBlock({ text, onExpandTable }: { text: string; onExpandTable?: (tableHtml: string) => void }) {
   if (!text) return null;
 
   return (
@@ -51,14 +98,40 @@ function SummaryBlock({ text }: { text: string }) {
               </a>
             );
           },
-          // Компоненты для таблиц
-          table: ({ children }) => (
-            <div className="my-4 overflow-x-auto rounded-lg border border-sgc-blue-200 shadow-sm">
-              <table className="min-w-full divide-y divide-sgc-blue-200">
-                {children}
-              </table>
-            </div>
-          ),
+          // Компоненты для таблиц с кнопкой разворота на десктопе
+          table: ({ children, node }) => {
+            const tableRef = { current: null as HTMLTableElement | null };
+
+            const handleExpand = () => {
+              if (tableRef.current && onExpandTable) {
+                onExpandTable(tableRef.current.outerHTML);
+              }
+            };
+
+            return (
+              <div className="my-4 relative group">
+                {/* Кнопка разворота - только на десктопе */}
+                {onExpandTable && (
+                  <button
+                    onClick={handleExpand}
+                    className="hidden md:flex absolute -top-2 -right-2 z-10 items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-sgc-blue-500 text-white hover:bg-sgc-blue-600 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Развернуть таблицу на весь экран"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    Развернуть
+                  </button>
+                )}
+                <div className="overflow-x-auto rounded-lg border border-sgc-blue-200 shadow-sm">
+                  <table
+                    ref={(el) => { tableRef.current = el; }}
+                    className="min-w-full divide-y divide-sgc-blue-200"
+                  >
+                    {children}
+                  </table>
+                </div>
+              </div>
+            );
+          },
           thead: ({ children }) => (
             <thead className="bg-sgc-orange-50">
               {children}
@@ -168,7 +241,7 @@ function CollapsibleDocumentsBlock({ quotes }: { quotes: QuoteItem[] }) {
 }
 
 // Компонент структурированного ответа
-function StructuredResponse({ content }: { content: string }) {
+function StructuredResponse({ content, onExpandTable }: { content: string; onExpandTable?: (tableHtml: string) => void }) {
   const parsed = parseAssistantResponse(content);
   const isStructured = hasStructuredFormat(content);
 
@@ -213,14 +286,39 @@ function StructuredResponse({ content }: { content: string }) {
               {children}
             </blockquote>
           ),
-          // Компоненты для таблиц
-          table: ({ children }) => (
-            <div className="my-4 overflow-x-auto rounded-lg border border-sgc-blue-200">
-              <table className="min-w-full divide-y divide-sgc-blue-200">
-                {children}
-              </table>
-            </div>
-          ),
+          // Компоненты для таблиц с кнопкой разворота
+          table: ({ children }) => {
+            const tableRef = { current: null as HTMLTableElement | null };
+
+            const handleExpand = () => {
+              if (tableRef.current && onExpandTable) {
+                onExpandTable(tableRef.current.outerHTML);
+              }
+            };
+
+            return (
+              <div className="my-4 relative group">
+                {onExpandTable && (
+                  <button
+                    onClick={handleExpand}
+                    className="hidden md:flex absolute -top-2 -right-2 z-10 items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-sgc-blue-500 text-white hover:bg-sgc-blue-600 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Развернуть таблицу на весь экран"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    Развернуть
+                  </button>
+                )}
+                <div className="overflow-x-auto rounded-lg border border-sgc-blue-200">
+                  <table
+                    ref={(el) => { tableRef.current = el; }}
+                    className="min-w-full divide-y divide-sgc-blue-200"
+                  >
+                    {children}
+                  </table>
+                </div>
+              </div>
+            );
+          },
           thead: ({ children }) => (
             <thead className="bg-sgc-blue-50">
               {children}
@@ -259,7 +357,7 @@ function StructuredResponse({ content }: { content: string }) {
 
   return (
     <div>
-      <SummaryBlock text={parsed.summary} />
+      <SummaryBlock text={parsed.summary} onExpandTable={onExpandTable} />
       <CollapsibleDocumentsBlock quotes={allQuotes} />
     </div>
   );
@@ -292,6 +390,9 @@ export default function ChatInterface() {
   // Состояния для загруженных документов
   const [uploadedFiles, setUploadedFiles] = useState<FileUploadResult[]>([]);
   const [capturedPhotos, setCapturedPhotos] = useState<PhotoItem[]>([]);
+
+  // Состояние для полноэкранной таблицы
+  const [fullscreenTableHtml, setFullscreenTableHtml] = useState<string | null>(null);
 
   const handleNewQuery = () => {
     setMessages([]);
@@ -442,8 +543,20 @@ export default function ChatInterface() {
     }
   };
 
+  // Функция для открытия таблицы в полноэкранном режиме
+  const handleExpandTable = useCallback((tableHtml: string) => {
+    setFullscreenTableHtml(tableHtml);
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc]">
+      {/* Модальное окно для полноэкранной таблицы */}
+      <FullscreenTableModal
+        isOpen={fullscreenTableHtml !== null}
+        onClose={() => setFullscreenTableHtml(null)}
+        tableHtml={fullscreenTableHtml || ''}
+      />
+
       {/* Header with SGC Gradient - compact on mobile */}
       <header className="bg-gradient-to-r from-[#152840] via-[#1e3a5f] to-[#2a4a6f] px-3 py-[9px] sm:px-6 sm:py-2 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
@@ -513,7 +626,7 @@ export default function ChatInterface() {
                     {message.role === 'user' ? (
                       <span className="whitespace-pre-wrap text-white">{message.content}</span>
                     ) : (
-                      <StructuredResponse content={message.content} />
+                      <StructuredResponse content={message.content} onExpandTable={handleExpandTable} />
                     )}
                   </div>
 
