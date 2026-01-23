@@ -143,6 +143,138 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция получения полного текста документа через Files API
+async function getFullDocumentContent(apiKey: string, fileId: string): Promise<string> {
+  if (!fileId) {
+    console.log('getFullDocumentContent: No fileId provided');
+    return '';
+  }
+
+  try {
+    const response = await fetch(`https://api.x.ai/v1/files/${fileId}/content`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      console.log(`Files content API error for ${fileId}: status=${response.status}, error=${errorText.substring(0, 200)}`);
+      return '';
+    }
+
+    const content = await response.text();
+    console.log(`Downloaded full content for ${fileId}: ${content.length} chars`);
+    return content;
+  } catch (error) {
+    console.error(`Files content API exception for ${fileId}:`, error);
+    return '';
+  }
+}
+
+// Интерфейс для результата поиска с полным контентом
+interface FullContentSearchResult {
+  fileId: string;
+  fileName: string;
+  content: string;
+  score: number;
+}
+
+// Функция поиска с получением полного текста документов
+// Используется для коллекций с небольшими документами (useFullContent: true)
+async function searchWithFullContent(
+  query: string,
+  apiKey: string,
+  collectionId: string
+): Promise<string> {
+  console.log('=== Search With Full Content ===');
+  console.log('Query:', query);
+  console.log('Collection ID:', collectionId);
+
+  try {
+    // ШАГ 1: Обычный поиск для определения релевантных документов
+    const requestBody = {
+      query: query,
+      source: {
+        collection_ids: [collectionId]
+      },
+      retrieval_mode: {
+        type: 'hybrid'
+      },
+      max_num_results: 30,
+      top_k: 30
+    };
+
+    const response = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Search failed:', response.status, errorText);
+      return '';
+    }
+
+    const data = await response.json();
+    const results = data.matches || data.results || [];
+    console.log('Initial search returned', results.length, 'results');
+
+    if (results.length === 0) {
+      return '';
+    }
+
+    // ШАГ 2: Получаем уникальные file_id и их метаданные
+    const uniqueFiles = new Map<string, { fileName: string; score: number }>();
+
+    for (const result of results) {
+      const fileId = result.file_id || '';
+      if (fileId && !uniqueFiles.has(fileId)) {
+        uniqueFiles.set(fileId, {
+          fileName: result.fields?.file_name || result.fields?.name || 'Документ',
+          score: result.score || 0
+        });
+      }
+    }
+
+    console.log('Unique files to download:', uniqueFiles.size);
+
+    // ШАГ 3: Скачиваем полный текст каждого уникального документа
+    const fullContentResults: FullContentSearchResult[] = await Promise.all(
+      Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
+        const content = await getFullDocumentContent(apiKey, fileId);
+        return {
+          fileId,
+          fileName: meta.fileName,
+          content,
+          score: meta.score
+        };
+      })
+    );
+
+    // Фильтруем документы без контента
+    const validResults = fullContentResults.filter(r => r.content.length > 0);
+    console.log('Documents with content:', validResults.length);
+
+    // ШАГ 4: Форматируем результаты с полным текстом
+    const formattedResults = validResults.map((r, i) => {
+      return `[${i + 1}] ${r.fileName} (релевантность: ${r.score.toFixed(3)}, file_id: ${r.fileId}):\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${r.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
+    }).join('\n\n---\n\n');
+
+    console.log('Formatted results length:', formattedResults.length);
+    return formattedResults;
+
+  } catch (error) {
+    console.error('Search with full content error:', error);
+    return '';
+  }
+}
+
 // Функция определения запрошенных полей таблицы из запроса пользователя
 function detectRequestedTableFields(query: string): {
   fields: string[];
@@ -1421,7 +1553,7 @@ export async function POST(req: Request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'grok-3-fast',
+          model: 'grok-4-1-fast',
           messages: [
             { role: 'system', content: systemPromptWithContext },
             ...apiMessages,
@@ -1458,7 +1590,8 @@ export async function POST(req: Request) {
       collectionKey,
       collectionName: collectionConfig?.displayName,
       isListAll,
-      collectionId
+      collectionId,
+      useFullContent: collectionConfig?.useFullContent ?? false
     });
 
     // Получаем документы - либо полный список, либо через поиск
@@ -1483,12 +1616,29 @@ if (isListAll) {
     } else {
       // Для обычных запросов - используем поиск
       const searchQuery = buildContextualSearchQuery(messages, 3);
-      documentResults = await searchCollection(searchQuery, apiKey, collectionId);
-      console.log('Search results length:', documentResults.length);
 
-      contextSection = documentResults
-        ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${documentResults}\n\nИспользуйте информацию из найденных документов для ответа.`
-        : '\n\nПоиск по документам не вернул результатов.';
+      // Проверяем, нужно ли использовать полный текст документов
+      const useFullContent = collectionConfig?.useFullContent ?? false;
+
+      if (useFullContent) {
+        // Для коллекций с небольшими документами (доверенности и т.п.)
+        // скачиваем полный текст вместо чанков
+        console.log('Using full content mode for collection:', collectionKey);
+        documentResults = await searchWithFullContent(searchQuery, apiKey, collectionId);
+        console.log('Full content search results length:', documentResults.length);
+
+        contextSection = documentResults
+          ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ (ПОЛНЫЙ ТЕКСТ):\n${documentResults}\n\nВАЖНО: Выше представлен ПОЛНЫЙ текст каждого найденного документа. Используйте всю информацию из документов для точного и полного ответа.`
+          : '\n\nПоиск по документам не вернул результатов.';
+      } else {
+        // Для коллекций с большими документами - используем чанки (как раньше)
+        documentResults = await searchCollection(searchQuery, apiKey, collectionId);
+        console.log('Chunk search results length:', documentResults.length);
+
+        contextSection = documentResults
+          ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${documentResults}\n\nИспользуйте информацию из найденных документов для ответа.`
+          : '\n\nПоиск по документам не вернул результатов.';
+      }
     }
 
     const systemPromptWithContext = systemPrompt + contextSection;
@@ -1508,7 +1658,7 @@ if (isListAll) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'grok-3-fast',
+        model: 'grok-4-1-fast',
         messages: [
           { role: 'system', content: systemPromptWithContext },
           ...apiMessages,
