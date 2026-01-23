@@ -5,6 +5,7 @@ import { useChat } from 'ai/react';
 import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { parseAssistantResponse, hasStructuredFormat, type ParsedResponse, type QuoteItem } from '@/lib/response-parser';
 import { exportToDocx } from '@/lib/docx-generator';
 
@@ -15,10 +16,50 @@ function SummaryBlock({ text }: { text: string }) {
   return (
     <div className="mb-4">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
+          h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-bold text-sgc-blue-500 mt-2 mb-1">{children}</h3>,
           p: ({ children }) => <p className="my-2 text-sgc-blue-500">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="ml-2 text-sgc-blue-500">{children}</li>,
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
+          // Компоненты для таблиц
+          table: ({ children }) => (
+            <div className="my-4 overflow-x-auto rounded-lg border border-sgc-blue-200 shadow-sm">
+              <table className="min-w-full divide-y divide-sgc-blue-200">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-sgc-orange-50">
+              {children}
+            </thead>
+          ),
+          tbody: ({ children }) => (
+            <tbody className="bg-white divide-y divide-sgc-blue-100">
+              {children}
+            </tbody>
+          ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-sgc-blue-50/50 transition-colors">
+              {children}
+            </tr>
+          ),
+          th: ({ children }) => (
+            <th className="px-4 py-3 text-left text-xs font-semibold text-sgc-blue-700 uppercase tracking-wider border-b-2 border-sgc-orange-300">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="px-4 py-3 text-sm text-sgc-blue-600 border-b border-sgc-blue-100">
+              {children}
+            </td>
+          ),
         }}
       >
         {text}
@@ -111,6 +152,7 @@ function StructuredResponse({ content }: { content: string }) {
   if (!isStructured) {
     return (
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => <h1 className="text-lg font-bold text-sgc-blue-500 mt-4 mb-2">{children}</h1>,
           h2: ({ children }) => <h2 className="text-base font-bold text-sgc-blue-500 mt-3 mb-2">{children}</h2>,
@@ -126,6 +168,39 @@ function StructuredResponse({ content }: { content: string }) {
             <blockquote className="border-l-4 border-sgc-orange-500/50 pl-3 my-2 italic text-sgc-blue-500/80">
               {children}
             </blockquote>
+          ),
+          // Компоненты для таблиц
+          table: ({ children }) => (
+            <div className="my-4 overflow-x-auto rounded-lg border border-sgc-blue-200">
+              <table className="min-w-full divide-y divide-sgc-blue-200">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-sgc-blue-50">
+              {children}
+            </thead>
+          ),
+          tbody: ({ children }) => (
+            <tbody className="bg-white divide-y divide-sgc-blue-100">
+              {children}
+            </tbody>
+          ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-sgc-blue-50/50 transition-colors">
+              {children}
+            </tr>
+          ),
+          th: ({ children }) => (
+            <th className="px-4 py-3 text-left text-xs font-semibold text-sgc-blue-700 uppercase tracking-wider">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="px-4 py-3 text-sm text-sgc-blue-600">
+              {children}
+            </td>
           ),
         }}
       >
