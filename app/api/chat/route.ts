@@ -64,6 +64,36 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
   };
 }
 
+// Максимальный размер контекста в символах для предотвращения 413 ошибки
+// xAI API имеет ограничение на размер запроса
+const MAX_CONTEXT_SIZE = 120000; // ~30K токенов
+
+// Функция для ограничения размера контекста
+function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
+  if (context.length <= maxSize) {
+    return { text: context, wasTruncated: false };
+  }
+
+  console.warn(`Context size ${context.length} exceeds limit ${maxSize}, truncating...`);
+
+  // Находим место для обрезки - предпочитаем обрезать на границе документа
+  const truncateAt = context.lastIndexOf('\n---', maxSize);
+
+  if (truncateAt > maxSize * 0.7) {
+    // Обрезаем на границе документа
+    return {
+      text: context.substring(0, truncateAt) + '\n\n[... Часть документов не показана из-за ограничения размера. Уточните запрос для получения нужной информации. ...]',
+      wasTruncated: true
+    };
+  } else {
+    // Обрезаем просто по размеру
+    return {
+      text: context.substring(0, maxSize) + '\n\n[... Текст обрезан из-за ограничения размера. Уточните запрос для получения нужной информации. ...]',
+      wasTruncated: true
+    };
+  }
+}
+
 // Функция поиска по коллекции через правильный endpoint
 async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
   console.log('=== Collection Search ===');
@@ -1564,9 +1594,23 @@ export async function POST(req: Request) {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('xAI API error:', errorText);
+        console.error('xAI API error (uploaded docs):', response.status, errorText);
+
+        // Обработка различных ошибок API с понятными сообщениями
+        let userFriendlyMessage = 'Произошла ошибка при обращении к AI сервису.';
+
+        if (response.status === 413) {
+          userFriendlyMessage = 'Загруженный документ слишком большой для обработки. Попробуйте загрузить документ меньшего размера или разбить его на части.';
+        } else if (response.status === 429) {
+          userFriendlyMessage = 'Слишком много запросов. Пожалуйста, подождите немного и повторите попытку.';
+        } else if (response.status === 401 || response.status === 403) {
+          userFriendlyMessage = 'Ошибка авторизации. Пожалуйста, обратитесь к администратору.';
+        } else if (response.status === 503 || response.status === 502) {
+          userFriendlyMessage = 'AI сервис временно недоступен. Пожалуйста, повторите попытку позже.';
+        }
+
         return new Response(
-          JSON.stringify({ error: 'xAI API error', details: errorText }),
+          JSON.stringify({ error: userFriendlyMessage }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -1641,7 +1685,17 @@ if (isListAll) {
       }
     }
 
-    const systemPromptWithContext = systemPrompt + contextSection;
+    // Логируем размер контекста для отладки
+    console.log('Context section size:', contextSection.length, 'characters');
+
+    // Ограничиваем размер контекста для предотвращения 413 ошибки
+    const { text: truncatedContext, wasTruncated } = truncateContextIfNeeded(contextSection);
+    if (wasTruncated) {
+      console.log('Context was truncated to:', truncatedContext.length, 'characters');
+    }
+
+    const systemPromptWithContext = systemPrompt + truncatedContext;
+    console.log('Total system prompt size:', systemPromptWithContext.length, 'characters');
 
     const apiMessages = messages.map((m: any) => ({
       role: m.role,
@@ -1671,9 +1725,23 @@ if (isListAll) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('xAI API error:', errorText);
+      console.error('xAI API error:', response.status, errorText);
+
+      // Обработка различных ошибок API с понятными сообщениями
+      let userFriendlyMessage = 'Произошла ошибка при обращении к AI сервису.';
+
+      if (response.status === 413) {
+        userFriendlyMessage = 'Запрос слишком большой. Попробуйте сформулировать запрос более конкретно или уточнить имя/номер документа.';
+      } else if (response.status === 429) {
+        userFriendlyMessage = 'Слишком много запросов. Пожалуйста, подождите немного и повторите попытку.';
+      } else if (response.status === 401 || response.status === 403) {
+        userFriendlyMessage = 'Ошибка авторизации. Пожалуйста, обратитесь к администратору.';
+      } else if (response.status === 503 || response.status === 502) {
+        userFriendlyMessage = 'AI сервис временно недоступен. Пожалуйста, повторите попытку позже.';
+      }
+
       return new Response(
-        JSON.stringify({ error: 'xAI API error', details: errorText }),
+        JSON.stringify({ error: userFriendlyMessage }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
