@@ -143,6 +143,31 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция получения информации о файле через Files API
+async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string } | null> {
+  try {
+    const response = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    // xAI Files API возвращает filename в поле filename или name
+    const filename = data.filename || data.name || data.original_filename || null;
+    const createdAt = data.created_at ? new Date(data.created_at * 1000).toLocaleDateString('ru-RU') : '';
+
+    return filename ? { filename, createdAt } : null;
+  } catch {
+    return null;
+  }
+}
+
 // Функция получения ПОЛНОГО списка всех документов из коллекции
 async function getAllDocuments(apiKey: string, collectionId: string): Promise<string> {
   console.log('=== Get All Documents ===');
@@ -218,18 +243,45 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       console.log('First document preview:', JSON.stringify(allDocuments[0]).substring(0, 500));
     }
 
-    // Форматируем список документов
-    const formattedResults = allDocuments.map((doc: any, i: number) => {
-      const fileName = doc.name || doc.file_name || doc.filename || doc.fields?.file_name || 'Документ';
-      const fileId = doc.file_id || doc.id || '';
-      const createdAt = doc.created_at ? new Date(doc.created_at * 1000).toLocaleDateString('ru-RU') : '';
-      const size = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
+    // Обогащаем документы информацией из Files API для получения оригинальных названий
+    // Делаем параллельные запросы для ускорения
+    const enrichedDocuments = await Promise.all(
+      allDocuments.map(async (doc: any) => {
+        const fileId = doc.file_id || doc.id || '';
 
-      return `[${i + 1}] ${fileName} (file_id: ${fileId}${createdAt ? `, загружен: ${createdAt}` : ''}${size ? `, размер: ${size}` : ''})`;
+        // Пробуем получить имя из документа коллекции
+        let fileName = doc.name || doc.file_name || doc.filename || doc.fields?.file_name || doc.metadata?.file_name || '';
+        let createdAt = doc.created_at ? new Date(doc.created_at * 1000).toLocaleDateString('ru-RU') : '';
+
+        // Если имя файла отсутствует или это просто "Документ", запрашиваем через Files API
+        if (!fileName || fileName === 'Документ') {
+          const fileInfo = await getFileInfo(apiKey, fileId);
+          if (fileInfo) {
+            fileName = fileInfo.filename;
+            if (!createdAt && fileInfo.createdAt) {
+              createdAt = fileInfo.createdAt;
+            }
+          }
+        }
+
+        return {
+          fileName: fileName || 'Документ',
+          fileId,
+          createdAt,
+          size: doc.size
+        };
+      })
+    );
+
+    // Форматируем список документов
+    const formattedResults = enrichedDocuments.map((doc, i: number) => {
+      const sizeStr = doc.size ? `${(doc.size / 1024 / 1024).toFixed(2)} MB` : '';
+
+      return `[${i + 1}] ${doc.fileName} (file_id: ${doc.fileId}${doc.createdAt ? `, загружен: ${doc.createdAt}` : ''}${sizeStr ? `, размер: ${sizeStr}` : ''})`;
     }).join('\n');
 
     // Добавляем итоговую информацию
-    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${allDocuments.length}`;
+    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${enrichedDocuments.length}`;
 
     return formattedResults + summary;
   } catch (error) {
