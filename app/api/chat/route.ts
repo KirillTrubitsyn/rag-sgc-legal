@@ -195,6 +195,82 @@ function detectRequestedTableFields(query: string): {
   };
 }
 
+// Словари для парсинга дат прописью
+const RUSSIAN_NUMBERS: Record<string, number> = {
+  'первое': 1, 'первого': 1, 'второе': 2, 'второго': 2, 'третье': 3, 'третьего': 3,
+  'четвертое': 4, 'четвертого': 4, 'пятое': 5, 'пятого': 5, 'шестое': 6, 'шестого': 6,
+  'седьмое': 7, 'седьмого': 7, 'восьмое': 8, 'восьмого': 8, 'девятое': 9, 'девятого': 9,
+  'десятое': 10, 'десятого': 10, 'одиннадцатое': 11, 'одиннадцатого': 11,
+  'двенадцатое': 12, 'двенадцатого': 12, 'тринадцатое': 13, 'тринадцатого': 13,
+  'четырнадцатое': 14, 'четырнадцатого': 14, 'пятнадцатое': 15, 'пятнадцатого': 15,
+  'шестнадцатое': 16, 'шестнадцатого': 16, 'семнадцатое': 17, 'семнадцатого': 17,
+  'восемнадцатое': 18, 'восемнадцатого': 18, 'девятнадцатое': 19, 'девятнадцатого': 19,
+  'двадцатое': 20, 'двадцатого': 20, 'двадцать': 20,
+  'тридцатое': 30, 'тридцатого': 30, 'тридцать': 30,
+};
+
+const RUSSIAN_MONTHS: Record<string, string> = {
+  'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+  'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+  'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+};
+
+const RUSSIAN_YEARS: Record<string, number> = {
+  'двадцать первого': 2021, 'двадцать второго': 2022, 'двадцать третьего': 2023,
+  'двадцать четвертого': 2024, 'двадцать пятого': 2025, 'двадцать шестого': 2026,
+  'двадцать седьмого': 2027, 'двадцать восьмого': 2028, 'двадцать девятого': 2029,
+  'тридцатого': 2030,
+};
+
+/**
+ * Парсит дату, написанную прописью на русском языке
+ * Например: "двадцать четвертое июня две тысячи двадцать пятого года"
+ */
+function parseRussianTextDate(text: string): string | null {
+  const lowerText = text.toLowerCase();
+
+  // Ищем паттерн: [число] [месяц] две тысячи [год] года
+  const datePattern = /([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/i;
+
+  const match = lowerText.match(datePattern);
+  if (!match) return null;
+
+  const [, dayText, monthText, yearText] = match;
+
+  // Парсим день
+  let day = 0;
+  const dayWords = dayText.trim().split(/\s+/);
+  for (const word of dayWords) {
+    if (RUSSIAN_NUMBERS[word]) {
+      day += RUSSIAN_NUMBERS[word];
+    }
+  }
+  if (day === 0 || day > 31) return null;
+
+  // Парсим месяц
+  const month = RUSSIAN_MONTHS[monthText.toLowerCase()];
+  if (!month) return null;
+
+  // Парсим год (две тысячи + X)
+  let year = 2000;
+  const yearKey = yearText.trim();
+  if (RUSSIAN_YEARS[yearKey]) {
+    year = RUSSIAN_YEARS[yearKey];
+  } else {
+    // Пробуем парсить по словам
+    const yearWords = yearKey.split(/\s+/);
+    for (const word of yearWords) {
+      if (RUSSIAN_NUMBERS[word]) {
+        year += RUSSIAN_NUMBERS[word];
+      }
+    }
+  }
+
+  if (year < 2020 || year > 2040) return null;
+
+  return `${day.toString().padStart(2, '0')}.${month}.${year}`;
+}
+
 // Функция извлечения полей доверенности из названия файла
 // Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.) от 01.01.2024 до 31.12.2024.pdf"
 function extractPoaFieldsFromFilename(filename: string): {
@@ -378,78 +454,109 @@ function extractPoaFieldsFromContent(content: string): {
     }
   }
 
-  // Извлекаем дату выдачи - более гибкие паттерны
-  const issueDatePatterns = [
-    // "от 01.01.2024", "от «01» января 2024"
-    /(?:от|выдан[аы]?)\s*[«"„]?(\d{1,2})[.\-\/\s»"]+(\d{1,2}|\w+)[.\-\/\s]+(\d{2,4})/i,
-    // Прямой формат даты в начале
-    /^[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})/m,
-    // "дата выдачи: 01.01.2024"
-    /(?:дата\s*(?:выдачи|составления|оформления))[:\s]*(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
-    // Простой формат даты dd.mm.yyyy
-    /(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})\s*(?:года?|г\.?)?/,
-  ];
-  for (const pattern of issueDatePatterns) {
-    const match = normalizedContent.match(pattern);
-    if (match) {
-      // Формируем дату
-      const day = match[1].padStart(2, '0');
-      let month = match[2];
-      const year = match[3].length === 2 ? '20' + match[3] : match[3];
-
-      // Если месяц текстовый, конвертируем
-      const monthMap: Record<string, string> = {
-        'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
-        'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
-        'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
-      };
-      if (monthMap[month.toLowerCase()]) {
-        month = monthMap[month.toLowerCase()];
-      } else {
-        month = month.padStart(2, '0');
-      }
-
-      result.issueDate = `${day}.${month}.${year}`;
-      break;
+  // Извлекаем дату выдачи - сначала пробуем даты прописью
+  // Ищем паттерн типа "двадцать четвертое июня две тысячи двадцать пятого года"
+  const textDatePattern = /([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
+  const textDates: string[] = [];
+  let textDateMatch;
+  while ((textDateMatch = textDatePattern.exec(normalizedContent)) !== null) {
+    const parsed = parseRussianTextDate(textDateMatch[0]);
+    if (parsed && !textDates.includes(parsed)) {
+      textDates.push(parsed);
     }
   }
 
-  // Извлекаем срок действия - более гибкие паттерны
-  const validUntilPatterns = [
-    // "действует до 31.12.2024", "срок действия до 31.12.2024"
-    /(?:действ[а-яё]*|срок[а-яё]*\s*действ[а-яё]*)[:\s]*(?:до|по)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
-    // "по 31.12.2024", "до 31.12.2024"
-    /(?:по|до)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})[»""']?\s*(?:года?|г\.?)?/i,
-    // "до «31» декабря 2024"
-    /(?:до|по)\s*[«"„]?(\d{1,2})[»""'\s]+(\w+)\s+(\d{4})/i,
-    // Последняя дата в документе (обычно это дата окончания)
-    /(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})\s*(?:года?|г\.?)?\s*$/,
-  ];
-  for (const pattern of validUntilPatterns) {
-    const match = normalizedContent.match(pattern);
-    if (match && match[1] && match[2] && match[3]) {
-      const day = match[1].padStart(2, '0');
-      let month = match[2];
-      const year = match[3].length === 2 ? '20' + match[3] : match[3];
+  // Если нашли даты прописью, используем их
+  if (textDates.length > 0) {
+    result.issueDate = textDates[0]; // Первая дата - дата выдачи
+    if (textDates.length > 1) {
+      result.validUntil = textDates[textDates.length - 1]; // Последняя дата - срок действия
+    }
+  }
 
-      const monthMap: Record<string, string> = {
-        'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
-        'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
-        'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
-      };
-      if (monthMap[month.toLowerCase()]) {
-        month = monthMap[month.toLowerCase()];
-      } else if (/^\d+$/.test(month)) {
-        month = month.padStart(2, '0');
-      } else {
-        continue; // Не удалось распознать месяц
-      }
+  // Если даты прописью не найдены, пробуем цифровые форматы
+  if (result.issueDate === 'Не указано') {
+    const issueDatePatterns = [
+      // "от 01.01.2024", "от «01» января 2024"
+      /(?:от|выдан[аы]?)\s*[«"„]?(\d{1,2})[.\-\/\s»"]+(\d{1,2}|\w+)[.\-\/\s]+(\d{2,4})/i,
+      // Прямой формат даты в начале
+      /^[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})/m,
+      // "дата выдачи: 01.01.2024"
+      /(?:дата\s*(?:выдачи|составления|оформления))[:\s]*(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
+      // Простой формат даты dd.mm.yyyy
+      /(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})\s*(?:года?|г\.?)?/,
+    ];
+    for (const pattern of issueDatePatterns) {
+      const match = normalizedContent.match(pattern);
+      if (match) {
+        const day = match[1].padStart(2, '0');
+        let month = match[2];
+        const year = match[3].length === 2 ? '20' + match[3] : match[3];
 
-      // Проверяем что это не та же дата что и дата выдачи
-      const candidateDate = `${day}.${month}.${year}`;
-      if (candidateDate !== result.issueDate) {
-        result.validUntil = candidateDate;
+        const monthMap: Record<string, string> = {
+          'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+          'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+          'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+        };
+        if (monthMap[month.toLowerCase()]) {
+          month = monthMap[month.toLowerCase()];
+        } else {
+          month = month.padStart(2, '0');
+        }
+
+        result.issueDate = `${day}.${month}.${year}`;
         break;
+      }
+    }
+  }
+
+  // Если срок действия не найден прописью, пробуем цифровые форматы
+  if (result.validUntil === 'Не указано') {
+    const validUntilPatterns = [
+      // "сроком по [дата прописью]" - специальный паттерн
+      /сроком?\s+по\s+([а-яё\s]+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)[а-яё\s]+года)/i,
+      // "действует до 31.12.2024", "срок действия до 31.12.2024"
+      /(?:действ[а-яё]*|срок[а-яё]*\s*действ[а-яё]*)[:\s]*(?:до|по)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/i,
+      // "по 31.12.2024", "до 31.12.2024"
+      /(?:по|до)\s*[«"„]?(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})[»""']?\s*(?:года?|г\.?)?/i,
+    ];
+
+    for (const pattern of validUntilPatterns) {
+      const match = normalizedContent.match(pattern);
+      if (match) {
+        // Проверяем, это дата прописью или цифрами
+        if (match[1] && !match[2]) {
+          // Дата прописью в группе 1
+          const parsed = parseRussianTextDate(match[1]);
+          if (parsed && parsed !== result.issueDate) {
+            result.validUntil = parsed;
+            break;
+          }
+        } else if (match[1] && match[2] && match[3]) {
+          // Цифровая дата
+          const day = match[1].padStart(2, '0');
+          let month = match[2];
+          const year = match[3].length === 2 ? '20' + match[3] : match[3];
+
+          const monthMap: Record<string, string> = {
+            'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+            'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+            'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+          };
+          if (monthMap[month.toLowerCase()]) {
+            month = monthMap[month.toLowerCase()];
+          } else if (/^\d+$/.test(month)) {
+            month = month.padStart(2, '0');
+          } else {
+            continue;
+          }
+
+          const candidateDate = `${day}.${month}.${year}`;
+          if (candidateDate !== result.issueDate) {
+            result.validUntil = candidateDate;
+            break;
+          }
+        }
       }
     }
   }
@@ -561,8 +668,11 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       'доверенность',
       'уполномочивает представлять интересы',
       'право подписи договор акт',
-      'срок действия до по', // Запрос для поиска дат окончания
-      'от выдана дата', // Запрос для поиска дат выдачи
+      'сроком по года включительно', // Запрос для поиска дат окончания (прописью)
+      'две тысячи двадцать года', // Запрос для дат прописью
+      'настоящей доверенностью', // Общий текст доверенностей
+      'АО Кемеровская генерация СГК', // Название организации
+      'Генерального директора', // Должность
     ];
 
     // Структура для хранения всех chunks по file_id
