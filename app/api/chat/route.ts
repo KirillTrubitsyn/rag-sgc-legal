@@ -469,6 +469,8 @@ function extractPoaFieldsFromContent(content: string): {
 
   // Извлекаем даты - СНАЧАЛА ищем срок действия с контекстом "сроком до/по"
   // Это более специфичный паттерн, который точно указывает на срок действия
+
+  // Паттерн 1: Полностью прописью (двадцать восьмое февраля две тысячи двадцать седьмого года)
   const validUntilTextPattern = /(?:сроком?\s+|действ[а-яё]*\s+|выдан[аы]?\s+)?(?:до|по)\s+([а-яё]+(?:\s+[а-яё]+)?(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
   let validUntilMatch;
   let foundValidUntil: string | null = null;
@@ -482,6 +484,27 @@ function extractPoaFieldsFromContent(content: string): {
     }
   }
 
+  // Паттерн 2: Смешанный формат - число цифрами (до 28 февраля 2027 года)
+  if (!foundValidUntil) {
+    const validUntilMixedPattern = /(?:сроком?\s+|действ[а-яё]*\s+)?(?:до|по)\s+(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})\s*(?:года?|г\.?)?/gi;
+    let mixedMatch;
+    while ((mixedMatch = validUntilMixedPattern.exec(normalizedContent)) !== null) {
+      const day = mixedMatch[1].padStart(2, '0');
+      const monthMap: Record<string, string> = {
+        'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+        'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+        'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+      };
+      const month = monthMap[mixedMatch[2].toLowerCase()];
+      const year = mixedMatch[3];
+      if (month) {
+        foundValidUntil = `${day}.${month}.${year}`;
+        result.validUntil = foundValidUntil;
+        break;
+      }
+    }
+  }
+
   // Теперь ищем ВСЕ даты прописью для определения даты выдачи
   const textDatePattern = /([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
   const textDates: string[] = [];
@@ -490,6 +513,26 @@ function extractPoaFieldsFromContent(content: string): {
     const parsed = parseRussianTextDate(textDateMatch[0]);
     if (parsed && !textDates.includes(parsed)) {
       textDates.push(parsed);
+    }
+  }
+
+  // Дополнительно ищем даты в смешанном формате (14 марта 2024 года)
+  const mixedDatePattern = /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})\s*(?:года?|г\.?)?/gi;
+  let mixedDateMatch;
+  const monthMap: Record<string, string> = {
+    'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
+    'мая': '05', 'июня': '06', 'июля': '07', 'августа': '08',
+    'сентября': '09', 'октября': '10', 'ноября': '11', 'декабря': '12'
+  };
+  while ((mixedDateMatch = mixedDatePattern.exec(normalizedContent)) !== null) {
+    const day = mixedDateMatch[1].padStart(2, '0');
+    const month = monthMap[mixedDateMatch[2].toLowerCase()];
+    const year = mixedDateMatch[3];
+    if (month) {
+      const dateStr = `${day}.${month}.${year}`;
+      if (!textDates.includes(dateStr)) {
+        textDates.push(dateStr);
+      }
     }
   }
 
@@ -802,7 +845,7 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       'доверенность',
       'уполномочивает представлять интересы',
       'настоящей доверенностью',
-      // Запросы для поиска дат прописью
+      // Запросы для поиска дат прописью - срок действия
       'сроком по года включительно',
       'две тысячи двадцать года',
       'по января две тысячи',
@@ -817,9 +860,38 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       'по октября две тысячи',
       'по ноября две тысячи',
       'по декабря две тысячи',
+      // Альтернативные запросы с "до" вместо "по"
+      'до января две тысячи',
+      'до февраля две тысячи',
+      'до марта две тысячи',
+      'до апреля две тысячи',
+      'до мая две тысячи',
+      'до июня две тысячи',
+      'до июля две тысячи',
+      'до августа две тысячи',
+      'до сентября две тысячи',
+      'до октября две тысячи',
+      'до ноября две тысячи',
+      'до декабря две тысячи',
       // Дополнительные запросы для дат выдачи
       'года выдана доверенность',
       'настоящая доверенность выдана',
+      // Запросы для дат выдачи прописью - по месяцам
+      'января две тысячи двадцать',
+      'февраля две тысячи двадцать',
+      'марта две тысячи двадцать',
+      'апреля две тысячи двадцать',
+      'мая две тысячи двадцать',
+      'июня две тысячи двадцать',
+      'июля две тысячи двадцать',
+      'августа две тысячи двадцать',
+      'сентября две тысячи двадцать',
+      'октября две тысячи двадцать',
+      'ноября две тысячи двадцать',
+      'декабря две тысячи двадцать',
+      // Общие запросы для поиска любых дат
+      'года город',
+      'года настоящая доверенность',
     ];
 
     // Map для хранения контента по file_id
@@ -950,8 +1022,12 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
         // Извлекаем данные из контента (если есть)
         const chunks = contentByFileId.get(fileId) || [];
-        for (const chunkContent of chunks) {
-          const contentFields = extractPoaFieldsFromContent(chunkContent);
+
+        // ВАЖНО: Объединяем ВСЕ чанки в один текст для полного анализа
+        // Это критично для длинных документов на несколько страниц
+        if (chunks.length > 0) {
+          const fullContent = chunks.join('\n\n');
+          const contentFields = extractPoaFieldsFromContent(fullContent);
 
           if (fio === 'Не указано' && contentFields.fio !== 'Не указано') {
             fio = contentFields.fio;
