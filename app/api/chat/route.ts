@@ -1,103 +1,60 @@
-import { legalSystemPrompt, poaSystemPrompt } from '@/lib/grok-client';
+import { legalSystemPrompt, poaSystemPrompt, getSystemPromptForCollection } from '@/lib/grok-client';
+import {
+  detectCollection,
+  isListAllQuery,
+  getCollectionId,
+  getCollectionConfig,
+  COLLECTIONS_CONFIG
+} from '@/lib/collections-config';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
 
-// Ключевые слова для определения запросов о ПОЛНОМ СПИСКЕ документов
-const LIST_ALL_KEYWORDS = [
-  // Прямые запросы на полный список
-  'все доверенност', 'всех доверенност', 'всем доверенност',
-  'все документ', 'всех документ', 'всем документ',
-  'полный список', 'полного списка', 'полном списке',
-  'список всех', 'перечень всех', 'перечисли все', 'перечислить все',
-  'покажи все', 'покажи всех', 'показать все', 'показать всех',
-  'выведи все', 'выведи всех', 'вывести все', 'вывести всех',
-  'какие доверенност', 'какие документ',
-  'сколько доверенност', 'сколько документ',
-  'общее количество', 'общий список',
-  'таблица всех', 'таблицу всех', 'таблица со всеми', 'таблицу со всеми',
-  'составь таблицу', 'составить таблицу',
-  'все имеющиеся', 'всех имеющихся', 'все загруженные', 'всех загруженных',
-  'база доверенност', 'базе доверенност', 'базу доверенност',
-  'в базе', 'из базы',
-];
-
-// Функция определения, запрашивает ли пользователь полный список документов
-function isListAllQuery(query: string): boolean {
-  const lowerQuery = query.toLowerCase();
-  return LIST_ALL_KEYWORDS.some(keyword => lowerQuery.includes(keyword));
+// Результат определения запроса
+interface QueryAnalysis {
+  collectionKey: string;      // Ключ коллекции (poa, general, contractForms, etc.)
+  isListAll: boolean;         // Запрос на полный список документов
+  collectionId: string;       // ID коллекции из env
+  systemPrompt: string;       // Системный промпт для коллекции
 }
 
-// Ключевые слова для определения запросов о доверенностях и полномочиях
-const POA_KEYWORDS = [
-  // Основные термины
-  'доверенност', 'полномочи', 'уполномоч', 'представител',
-  'право подписи', 'право подписания', 'подписывать', 'подписать',
-  'от имени', 'по доверенности', 'делегирован', 'передача полномочий',
-  'кто может подписать', 'кто имеет право', 'кто уполномочен',
-  'представлять интересы', 'действовать от имени',
-
-  // Типы документов для подписания
-  'подписание договор', 'подписать договор', 'заключить договор', 'заключать договор',
-  'подписание акт', 'подписать акт', 'акт выполненных работ', 'акт приема',
-  'подписание письм', 'подписать письм', 'письма в госорган', 'государственные органы',
-  'подписание счет', 'подписать счет', 'счет-фактур',
-  'подписание накладн', 'подписать накладн', 'товарная накладная',
-  'подписание приказ', 'подписать приказ',
-  'подписание соглашен', 'подписать соглашен', 'дополнительное соглашение',
-
-  // Финансовые ограничения
-  'на сумму', 'до суммы', 'лимит', 'ограничен', 'не более', 'не превышающ',
-  'рублей', 'миллион', 'тысяч',
-
-  // Организации группы СГК
-  'от имени сгк', 'от имени кузбассэнерго', 'от имени енисейской', 'от имени тгк',
-  'сгк', 'кузбассэнерго', 'енисейская', 'тгк-13', 'тгк 13',
-
-  // Вопросы о возможности/праве
-  'может ли', 'имеет ли право', 'есть ли у', 'вправе ли',
-  'кто может', 'кто вправе', 'кто имеет',
-
-  // ФИО из документов - примеры для поиска по конкретным сотрудникам
-  'мажирин', 'денисов', 'ким', 'пономарева', 'голофаст', 'шемчук', 'стромов'
-];
-
-// Функция определения, касается ли запрос доверенностей и полномочий
-function isPowerOfAttorneyQuery(query: string): boolean {
-  const lowerQuery = query.toLowerCase();
-  return POA_KEYWORDS.some(keyword => lowerQuery.includes(keyword));
-}
-
-// Определение типа запроса на основе сообщений
-type QueryType = 'poa' | 'general' | 'both' | 'poa_list_all' | 'general_list_all';
-
-function determineQueryType(messages: any[]): QueryType {
-  // Проверяем последние 3 сообщения пользователя
+// Анализ запроса пользователя и определение коллекции
+function analyzeQuery(messages: any[]): QueryAnalysis | null {
+  // Получаем последние 3 сообщения пользователя для анализа контекста
   const userMessages = messages
     .filter((m: any) => m.role === 'user')
     .slice(-3);
 
   const combinedText = userMessages.map((m: any) => m.content).join(' ');
 
-  // Сначала проверяем, не просит ли пользователь ПОЛНЫЙ СПИСОК документов
-  const wantsListAll = isListAllQuery(combinedText);
-  const isPOA = isPowerOfAttorneyQuery(combinedText);
+  // Определяем коллекцию по ключевым словам
+  const collectionKey = detectCollection(combinedText);
 
-  if (wantsListAll && isPOA) {
-    return 'poa_list_all';
+  // Проверяем, запрашивает ли пользователь полный список
+  const isListAll = isListAllQuery(combinedText);
+
+  // Получаем ID коллекции из переменных окружения
+  let collectionId = getCollectionId(collectionKey);
+
+  // Если коллекция не найдена, используем general
+  if (!collectionId) {
+    console.log(`Collection ${collectionKey} not configured, falling back to general`);
+    collectionId = getCollectionId('general');
   }
 
-  if (wantsListAll) {
-    // Если запрос про список всех документов, но без ключевых слов о доверенностях
-    // Проверим контекст - если в истории есть упоминание доверенностей, считаем это POA запросом
-    return 'general_list_all';
+  if (!collectionId) {
+    return null;
   }
 
-  if (isPOA) {
-    return 'poa';
-  }
+  // Получаем системный промпт для коллекции
+  const systemPrompt = getSystemPromptForCollection(collectionKey);
 
-  return 'general';
+  return {
+    collectionKey,
+    isListAll,
+    collectionId,
+    systemPrompt,
+  };
 }
 
 // Функция поиска по коллекции через правильный endpoint
@@ -311,59 +268,50 @@ export async function POST(req: Request) {
     console.log('Messages received:', messages.length);
 
     const apiKey = process.env.XAI_API_KEY;
-    const generalCollectionId = process.env.COLLECTION_ID;
-    const poaCollectionId = process.env.POA_COLLECTION_ID;
 
-    if (!apiKey || !generalCollectionId) {
-      console.error('Missing env vars. apiKey:', !!apiKey, 'generalCollectionId:', !!generalCollectionId);
+    if (!apiKey) {
+      console.error('Missing XAI_API_KEY');
       return new Response(
-        JSON.stringify({ error: 'Missing env vars' }),
+        JSON.stringify({ error: 'Missing API key' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Определяем тип запроса
-    const queryType = determineQueryType(messages);
-    console.log('Query type detected:', queryType);
+    // Анализируем запрос и определяем коллекцию
+    const queryAnalysis = analyzeQuery(messages);
 
-    // Выбираем коллекцию и промпт на основе типа запроса
-    let collectionId: string;
-    let baseSystemPrompt: string;
-    let isListAllRequest = false;
-
-    if (queryType === 'poa_list_all' && poaCollectionId) {
-      collectionId = poaCollectionId;
-      baseSystemPrompt = poaSystemPrompt;
-      isListAllRequest = true;
-      console.log('Using POA collection for LIST ALL:', collectionId);
-    } else if (queryType === 'general_list_all') {
-      collectionId = generalCollectionId;
-      baseSystemPrompt = legalSystemPrompt;
-      isListAllRequest = true;
-      console.log('Using general collection for LIST ALL:', collectionId);
-    } else if (queryType === 'poa' && poaCollectionId) {
-      collectionId = poaCollectionId;
-      baseSystemPrompt = poaSystemPrompt;
-      console.log('Using POA collection:', collectionId);
-    } else {
-      collectionId = generalCollectionId;
-      baseSystemPrompt = legalSystemPrompt;
-      console.log('Using general collection:', collectionId);
+    if (!queryAnalysis) {
+      console.error('No collection configured');
+      return new Response(
+        JSON.stringify({ error: 'No collection configured' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
+
+    const { collectionKey, isListAll, collectionId, systemPrompt } = queryAnalysis;
+    const collectionConfig = getCollectionConfig(collectionKey);
+
+    console.log('Query analysis:', {
+      collectionKey,
+      collectionName: collectionConfig?.displayName,
+      isListAll,
+      collectionId
+    });
 
     // Получаем документы - либо полный список, либо через поиск
     let documentResults: string;
     let contextSection: string;
 
-    if (isListAllRequest) {
+    if (isListAll) {
       // Для запросов о полном списке - получаем ВСЕ документы из коллекции
       console.log('Fetching ALL documents from collection...');
       documentResults = await getAllDocuments(apiKey, collectionId);
       console.log('All documents results length:', documentResults.length);
 
+      const collectionName = collectionConfig?.displayName || 'документов';
       contextSection = documentResults
-        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ:\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных. Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа. Сформируй красивую таблицу со всеми документами.`
-        : '\n\nВ базе данных нет документов.';
+        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа. Сформируй красивую таблицу со всеми документами.`
+        : `\n\nВ базе данных "${collectionName}" нет документов.`;
     } else {
       // Для обычных запросов - используем поиск
       const searchQuery = buildContextualSearchQuery(messages, 3);
@@ -375,7 +323,7 @@ export async function POST(req: Request) {
         : '\n\nПоиск по документам не вернул результатов.';
     }
 
-    const systemPromptWithContext = baseSystemPrompt + contextSection;
+    const systemPromptWithContext = systemPrompt + contextSection;
 
     const apiMessages = messages.map((m: any) => ({
       role: m.role,
