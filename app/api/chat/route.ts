@@ -856,18 +856,26 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     }
 
     // Если list API вернул документы без имён, но search нашёл file_id - используем search как источник
-    // Также добавляем документы из search которых нет в list
+    // Также добавляем документы из search которых нет в list (только если есть имя файла)
     const listFileIds = new Set(allDocuments.map((d: any) => d.file_id || d.id).filter(Boolean));
     const searchFileIds = new Set([...contentByFileId.keys(), ...fileNamesByFileId.keys()]);
 
-    // Добавляем документы из search которых нет в list
+    // Добавляем документы из search которых нет в list, ТОЛЬКО если у них есть имя файла
+    let addedFromSearch = 0;
     for (const fileId of searchFileIds) {
       if (!listFileIds.has(fileId)) {
-        allDocuments.push({ file_id: fileId });
-        console.log(`Added document from search: ${fileId}`);
+        // Добавляем только если есть имя файла из search
+        const fileName = fileNamesByFileId.get(fileId);
+        if (fileName) {
+          allDocuments.push({ file_id: fileId, name: fileName });
+          console.log(`Added document from search: ${fileId} (${fileName})`);
+          addedFromSearch++;
+        } else {
+          console.log(`Skipped document from search (no filename): ${fileId}`);
+        }
       }
     }
-    console.log(`Total documents after merge: ${allDocuments.length} (list: ${listFileIds.size}, search unique: ${searchFileIds.size})`);
+    console.log(`Total documents after merge: ${allDocuments.length} (list: ${listFileIds.size}, added from search: ${addedFromSearch})`);
 
     // ШАГ 3: Обогащаем ВСЕ документы данными из поиска и Files API
     const enrichedDocuments = await Promise.all(
@@ -930,8 +938,22 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       })
     );
 
+    // Фильтруем полностью пустые документы (без имени файла и без данных)
+    const filteredDocuments = enrichedDocuments.filter((doc) => {
+      const hasRealFileName = doc.fileName && doc.fileName !== 'Документ';
+      const hasAnyData = doc.fio !== 'Не указано' ||
+                         doc.poaNumber !== 'Не указано' ||
+                         doc.issueDate !== 'Не указано' ||
+                         doc.validUntil !== 'Не указано';
+
+      // Оставляем документ если есть реальное имя файла ИЛИ хотя бы одно поле данных
+      return hasRealFileName || hasAnyData;
+    });
+
+    console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
+
     // Форматируем результаты
-    const formattedResults = enrichedDocuments.map((doc, i) => {
+    const formattedResults = filteredDocuments.map((doc, i) => {
       const downloadLink = doc.fileId
         ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
         : '';
@@ -943,7 +965,7 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     console.log(formattedResults.split('\n').slice(0, 3).join('\n'));
     console.log('=== END PREVIEW ===');
 
-    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${enrichedDocuments.length}`;
+    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${filteredDocuments.length}`;
     return formattedResults + summary;
 
   } catch (error) {
@@ -1041,8 +1063,21 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
       })
     );
 
+    // Фильтруем полностью пустые документы (без имени файла и без данных)
+    const filteredDocuments = enrichedDocuments.filter((doc) => {
+      const hasRealFileName = doc.fileName && doc.fileName !== 'Документ';
+      const hasAnyData = doc.fio !== 'Не указано' ||
+                         doc.poaNumber !== 'Не указано' ||
+                         doc.issueDate !== 'Не указано' ||
+                         doc.validUntil !== 'Не указано';
+
+      return hasRealFileName || hasAnyData;
+    });
+
+    console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
+
     // Форматируем результаты
-    const formattedResults = enrichedDocuments.map((doc, i) => {
+    const formattedResults = filteredDocuments.map((doc, i) => {
       const downloadLink = doc.fileId
         ? `/api/download?file_id=${doc.fileId}&filename=${encodeURIComponent(doc.fileName)}`
         : '';
@@ -1050,7 +1085,7 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
       return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | file_id: ${doc.fileId || 'отсутствует'} | Ссылка: ${downloadLink}`;
     }).join('\n');
 
-    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${enrichedDocuments.length}`;
+    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${filteredDocuments.length}`;
     return formattedResults + summary;
 
   } catch (error) {
