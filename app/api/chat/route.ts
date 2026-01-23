@@ -143,6 +143,58 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
   }
 }
 
+// Функция определения запрошенных полей таблицы из запроса пользователя
+function detectRequestedTableFields(query: string): {
+  fields: string[];
+  instruction: string;
+} {
+  const lowerQuery = query.toLowerCase();
+  const allFields = ['№', 'Файл', 'ФИО', 'Номер', 'Дата выдачи', 'Действует до', 'Скачать'];
+  const requestedFields: string[] = ['№']; // № всегда включаем
+
+  // Проверяем, какие поля запрошены
+  const fieldMappings: { keywords: string[]; field: string }[] = [
+    { keywords: ['фио', 'фамили', 'имя', 'имен', 'сотрудник', 'кто'], field: 'ФИО' },
+    { keywords: ['номер', 'номера', '№ довер'], field: 'Номер' },
+    { keywords: ['дат', 'выдач', 'выдан', 'когда выдан'], field: 'Дата выдачи' },
+    { keywords: ['срок', 'действ', 'до какого', 'истека', 'оконч', 'заканчива'], field: 'Действует до' },
+    { keywords: ['файл', 'документ', 'название'], field: 'Файл' },
+    { keywords: ['скача', 'ссылк', 'загруз', 'download'], field: 'Скачать' },
+  ];
+
+  let hasSpecificRequest = false;
+
+  for (const mapping of fieldMappings) {
+    if (mapping.keywords.some(kw => lowerQuery.includes(kw))) {
+      if (!requestedFields.includes(mapping.field)) {
+        requestedFields.push(mapping.field);
+      }
+      hasSpecificRequest = true;
+    }
+  }
+
+  // Если нет конкретных запросов или запрос общий — показываем все поля
+  if (!hasSpecificRequest || lowerQuery.includes('все поля') || lowerQuery.includes('полную таблицу') || lowerQuery.includes('всю информацию')) {
+    return {
+      fields: allFields,
+      instruction: 'Покажи ВСЕ доступные поля в таблице.'
+    };
+  }
+
+  // Всегда добавляем ссылку на скачивание
+  if (!requestedFields.includes('Скачать')) {
+    requestedFields.push('Скачать');
+  }
+
+  // Сортируем поля в правильном порядке
+  const orderedFields = allFields.filter(f => requestedFields.includes(f));
+
+  return {
+    fields: orderedFields,
+    instruction: `Пользователь запросил ТОЛЬКО следующие поля: ${orderedFields.join(', ')}. Покажи ТОЛЬКО эти колонки в таблице, НЕ добавляй другие.`
+  };
+}
+
 // Функция извлечения полей доверенности из названия файла
 // Ожидаемые форматы: "КГ-24-127 (Мажирин О.Е.) от 01.01.2024 до 31.12.2024.pdf"
 function extractPoaFieldsFromFilename(filename: string): {
@@ -560,9 +612,14 @@ if (isListAll) {
       documentResults = await getAllDocuments(apiKey, collectionId);
       console.log('All documents results length:', documentResults.length);
 
+      // Определяем, какие поля запросил пользователь
+      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+      const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
+      console.log('Requested table fields:', fields);
+
       const collectionName = collectionConfig?.displayName || 'документов';
       contextSection = documentResults
-        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа. Сформируй красивую таблицу со всеми документами.`
+        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}`
         : `\n\nВ базе данных "${collectionName}" нет документов.`;
     } else {
       // Для обычных запросов - используем поиск
