@@ -555,15 +555,18 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
   console.log('Collection ID:', collectionId);
 
   try {
-    // Используем поисковый API с широким запросом для получения всех документов
-    // Это гарантирует получение file_id для каждого документа
+    // Используем поисковый API с разными запросами для получения разных частей документов
+    // Это помогает собрать больше информации (даты могут быть в разных частях)
     const searchQueries = [
       'доверенность',
       'уполномочивает представлять интересы',
       'право подписи договор акт',
+      'срок действия до по', // Запрос для поиска дат окончания
+      'от выдана дата', // Запрос для поиска дат выдачи
     ];
 
-    const allResults = new Map<string, any>(); // Используем Map для дедупликации по file_id
+    // Структура для хранения всех chunks по file_id
+    const allChunks = new Map<string, { chunks: string[]; result: any }>();
 
     for (const query of searchQueries) {
       console.log(`Searching with query: "${query}"`);
@@ -597,44 +600,54 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       const results = data.matches || data.results || [];
       console.log(`Search "${query}" returned ${results.length} results`);
 
-      // Добавляем результаты в Map с дедупликацией
+      // Собираем ВСЕ chunks для каждого документа
       for (const result of results) {
         const fileId = result.file_id || '';
-        if (fileId && !allResults.has(fileId)) {
-          allResults.set(fileId, result);
+        const content = result.chunk_content || result.content || result.text || '';
+
+        if (fileId) {
+          if (!allChunks.has(fileId)) {
+            allChunks.set(fileId, { chunks: [], result });
+          }
+          // Добавляем chunk если он уникальный
+          const existing = allChunks.get(fileId)!;
+          if (content && !existing.chunks.includes(content)) {
+            existing.chunks.push(content);
+          }
         }
       }
     }
 
-    console.log(`Total unique documents found: ${allResults.size}`);
+    console.log(`Total unique documents found: ${allChunks.size}`);
 
-    if (allResults.size === 0) {
+    if (allChunks.size === 0) {
       console.log('No documents found in collection via search');
       // Fallback: попробуем получить документы через list endpoint
       return await getAllDocumentsViaList(apiKey, collectionId);
     }
 
     // Логируем первый результат для отладки
-    const firstResult = Array.from(allResults.values())[0];
-    if (firstResult) {
+    const firstEntry = Array.from(allChunks.entries())[0];
+    if (firstEntry) {
+      const [fileId, data] = firstEntry;
       console.log('=== SEARCH RESULT STRUCTURE DEBUG ===');
-      console.log('First result keys:', Object.keys(firstResult));
-      console.log('file_id:', firstResult.file_id);
-      console.log('fields:', JSON.stringify(firstResult.fields, null, 2));
-      console.log('chunk_content preview:', (firstResult.chunk_content || '').substring(0, 200));
+      console.log('file_id:', fileId);
+      console.log('Total chunks for this document:', data.chunks.length);
+      console.log('First chunk preview:', data.chunks[0]?.substring(0, 200));
+      console.log('Result keys:', Object.keys(data.result));
+      console.log('fields:', JSON.stringify(data.result.fields, null, 2));
       console.log('=== END DEBUG ===');
     }
 
-    // Обогащаем документы метаданными
+    // Обогащаем документы метаданными, используя ВСЕ chunks
     const enrichedDocuments = await Promise.all(
-      Array.from(allResults.entries()).map(async ([fileId, result], index) => {
+      Array.from(allChunks.entries()).map(async ([fileId, data], index) => {
+        const { chunks, result } = data;
+
         // Получаем имя файла из разных источников
         let fileName = result.fields?.file_name || result.fields?.name ||
                        result.metadata?.file_name || result.metadata?.name ||
                        result.name || '';
-
-        // Получаем контент для извлечения метаданных
-        const content = result.chunk_content || result.content || result.text || '';
 
         // Если имя не найдено, запрашиваем через Files API
         if (!fileName && fileId) {
@@ -644,33 +657,41 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           }
         }
 
+        // Извлекаем поля из названия файла
+        let { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+
+        // Извлекаем данные из ВСЕХ chunks документа
+        // Это важно, так как даты могут быть в разных частях документа
+        for (const chunkContent of chunks) {
+          if (chunkContent) {
+            const contentFields = extractPoaFieldsFromContent(chunkContent);
+
+            // Обновляем только если нашли новые данные
+            if (fio === 'Не указано' && contentFields.fio !== 'Не указано') {
+              fio = contentFields.fio;
+            }
+            if (poaNumber === 'Не указано' && contentFields.poaNumber !== 'Не указано') {
+              poaNumber = contentFields.poaNumber;
+            }
+            if (issueDate === 'Не указано' && contentFields.issueDate !== 'Не указано') {
+              issueDate = contentFields.issueDate;
+            }
+            if (validUntil === 'Не указано' && contentFields.validUntil !== 'Не указано') {
+              validUntil = contentFields.validUntil;
+            }
+          }
+        }
+
         if (index < 3) {
           console.log(`Document ${index}:`, {
             fileId,
             fileName,
-            hasContent: !!content,
-            contentLength: content.length
+            chunksCount: chunks.length,
+            fio,
+            poaNumber,
+            issueDate,
+            validUntil
           });
-        }
-
-        // Извлекаем поля из названия файла
-        let { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
-
-        // Если данные не извлечены из названия - извлекаем из содержимого
-        if (content && (fio === 'Не указано' || poaNumber === 'Не указано')) {
-          const contentFields = extractPoaFieldsFromContent(content);
-          if (fio === 'Не указано' && contentFields.fio !== 'Не указано') {
-            fio = contentFields.fio;
-          }
-          if (poaNumber === 'Не указано' && contentFields.poaNumber !== 'Не указано') {
-            poaNumber = contentFields.poaNumber;
-          }
-          if (issueDate === 'Не указано' && contentFields.issueDate !== 'Не указано') {
-            issueDate = contentFields.issueDate;
-          }
-          if (validUntil === 'Не указано' && contentFields.validUntil !== 'Не указано') {
-            validUntil = contentFields.validUntil;
-          }
         }
 
         return {
