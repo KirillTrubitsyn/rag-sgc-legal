@@ -2433,14 +2433,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // Анализируем запрос и определяем коллекцию с помощью LLM
-    const queryAnalysis = await analyzeQueryWithLLM(messages, apiKey);
-
-    // Проверяем загруженные документы в первую очередь
+    // СНАЧАЛА проверяем загруженные документы - если есть, пропускаем маршрутизацию
     const isUploadedDocumentRequest = hasUploadedDocuments(messages);
 
     if (isUploadedDocumentRequest) {
-      console.log('Using uploaded document mode - no collection search');
+      console.log('Using uploaded document mode - skipping collection routing');
 
       // Для загруженных документов используем специальный промпт
       const systemPromptWithContext = uploadedDocumentSystemPrompt +
@@ -2495,6 +2492,9 @@ export async function POST(req: Request) {
       // Используем общую трансформацию потока
       return createStreamResponse(response);
     }
+
+    // Если нет загруженных документов - выполняем маршрутизацию по коллекциям
+    const queryAnalysis = await analyzeQueryWithLLM(messages, apiKey);
 
     // Проверяем, требуется ли уточнение от пользователя
     if (queryAnalysis.needsClarification) {
