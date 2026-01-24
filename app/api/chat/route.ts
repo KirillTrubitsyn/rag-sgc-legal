@@ -84,7 +84,8 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
 
 // Максимальный размер контекста в символах для предотвращения 413 ошибки
 // xAI API имеет ограничение на размер запроса
-const MAX_CONTEXT_SIZE = 80000; // ~20K токенов - уменьшено для предотвращения 413 ошибки
+const MAX_CONTEXT_SIZE = 80000; // ~20K токенов - стандартный лимит
+const MAX_CONTEXT_SIZE_LARGE = 200000; // ~50K токенов - для больших документов (уставы)
 
 // Функция для ограничения размера контекста
 function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
@@ -2284,9 +2285,11 @@ if (isListAll) {
     console.log('Context section size:', contextSection.length, 'characters');
 
     // Ограничиваем размер контекста для предотвращения 413 ошибки
-    const { text: truncatedContext, wasTruncated } = truncateContextIfNeeded(contextSection);
+    // Для уставов используем увеличенный лимит, т.к. они большие и нужен полный текст
+    const contextLimit = collectionKey === 'articlesOfAssociation' ? MAX_CONTEXT_SIZE_LARGE : MAX_CONTEXT_SIZE;
+    const { text: truncatedContext, wasTruncated } = truncateContextIfNeeded(contextSection, contextLimit);
     if (wasTruncated) {
-      console.log('Context was truncated to:', truncatedContext.length, 'characters');
+      console.log('Context was truncated to:', truncatedContext.length, 'characters (limit:', contextLimit, ')');
     }
 
     const systemPromptWithContext = systemPrompt + truncatedContext;
