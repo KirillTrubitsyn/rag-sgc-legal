@@ -1126,9 +1126,16 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
 
 // Быстрая функция получения списка документов БЕЗ загрузки контента
 // Используется для больших документов (уставы) чтобы избежать таймаутов
-async function getDocumentsListFast(apiKey: string, collectionId: string): Promise<string> {
+// Поисковые запросы для разных типов коллекций
+const COLLECTION_SEARCH_QUERIES: Record<string, string> = {
+  articlesOfAssociation: 'устав общество положение документ организация',
+  contractForms: 'договор форма шаблон образец соглашение акт',
+  general: 'документ положение стандарт регламент инструкция',
+};
+
+async function getDocumentsListFast(apiKey: string, collectionId: string, collectionKey?: string): Promise<string> {
   console.log('=== Get Documents List (Fast mode) ===');
-  console.log('Collection ID:', collectionId);
+  console.log('Collection ID:', collectionId, 'Collection Key:', collectionKey);
 
   try {
     // ШАГ 1: Получаем список документов через list API
@@ -1167,6 +1174,10 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
     // Search API возвращает file_name в результатах
     const fileNamesByFileId = new Map<string, string>();
 
+    // Выбираем подходящий поисковый запрос для коллекции
+    const searchQuery = COLLECTION_SEARCH_QUERIES[collectionKey || ''] || COLLECTION_SEARCH_QUERIES.general;
+    console.log('Using search query:', searchQuery);
+
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
       method: 'POST',
       headers: {
@@ -1174,7 +1185,7 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        query: 'устав общество положение документ',  // Общий запрос для уставов
+        query: searchQuery,
         source: { collection_ids: [collectionId] },
         retrieval_mode: { type: 'hybrid' },
         max_num_results: 100,
@@ -2077,7 +2088,7 @@ if (isListAll) {
           : `\n\nВ базе данных "${collectionName}" нет документов.`;
       } else {
         // Для других коллекций (уставы, формы договоров) - быстрая загрузка только списка
-        documentResults = await getDocumentsListFast(apiKey, collectionId);
+        documentResults = await getDocumentsListFast(apiKey, collectionId, collectionKey);
         console.log('Fast documents list length:', documentResults.length);
 
         contextSection = documentResults
