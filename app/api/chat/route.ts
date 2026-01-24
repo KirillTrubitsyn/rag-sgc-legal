@@ -1192,7 +1192,8 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
       const hasMore = data.has_more || (batch.length === limit);
       if (hasMore && batch.length > 0) {
         const lastDoc = batch[batch.length - 1];
-        cursor = lastDoc.file_id || lastDoc.id;
+        // List API возвращает file_id во вложенной структуре file_metadata
+        cursor = lastDoc.file_metadata?.file_id || lastDoc.file_id || lastDoc.id;
       } else {
         cursor = null;
       }
@@ -1251,8 +1252,9 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
     // ШАГ 2.5: Для документов без имён - получаем через Files API (батчами по 5)
     const docsNeedingNames: string[] = [];
     for (const doc of documents) {
-      const fileId = doc.file_id || doc.id || '';
-      const hasNameFromList = doc.file_name || doc.name || doc.title;
+      // List API возвращает данные во вложенной структуре file_metadata
+      const fileId = doc.file_metadata?.file_id || doc.file_id || doc.id || '';
+      const hasNameFromList = doc.file_metadata?.name || doc.file_name || doc.name || doc.title;
       const hasNameFromSearch = fileNamesByFileId.has(fileId);
       if (fileId && !hasNameFromList && !hasNameFromSearch) {
         docsNeedingNames.push(fileId);
@@ -1279,16 +1281,17 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 
     // ШАГ 3: Обогащаем документы названиями
     const enrichedDocs = documents.map((doc: any, index: number) => {
-      const fileId = doc.file_id || doc.id || '';
-      // Пробуем получить имя из list API, затем из search
-      let fileName = doc.file_name || doc.name || doc.title || '';
+      // List API возвращает данные во вложенной структуре file_metadata
+      const fileId = doc.file_metadata?.file_id || doc.file_id || doc.id || '';
+      // Пробуем получить имя из list API (file_metadata.name), затем из search
+      let fileName = doc.file_metadata?.name || doc.file_name || doc.name || doc.title || '';
       if (!fileName && fileId) {
         fileName = fileNamesByFileId.get(fileId) || '';
       }
 
       // Логируем для отладки
       if (index < 3) {
-        console.log(`Doc ${index}: fileId=${fileId}, fileName from list=${doc.file_name || doc.name || 'none'}, fileName from search=${fileNamesByFileId.get(fileId) || 'none'}`);
+        console.log(`Doc ${index}: fileId=${fileId}, fileName from list=${doc.file_metadata?.name || doc.file_name || doc.name || 'none'}, fileName from search=${fileNamesByFileId.get(fileId) || 'none'}`);
       }
 
       // Убираем расширение файла для красивого отображения названия
@@ -1367,7 +1370,8 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       const hasMore = data.has_more || (documents.length === limit);
       if (hasMore && documents.length > 0) {
         const lastDoc = documents[documents.length - 1];
-        cursor = lastDoc.file_id || lastDoc.id;
+        // List API возвращает file_id во вложенной структуре file_metadata
+        cursor = lastDoc.file_metadata?.file_id || lastDoc.file_id || lastDoc.id;
       } else {
         cursor = null;
       }
@@ -1416,8 +1420,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
     // Собираем file_id документов, для которых нет имён
     const docsNeedingNames: string[] = [];
     for (const doc of allDocuments) {
-      const fileId = doc.file_id || doc.id || '';
-      const hasNameFromList = doc.file_name || doc.name || doc.title;
+      // List API возвращает данные во вложенной структуре file_metadata
+      const fileId = doc.file_metadata?.file_id || doc.file_id || doc.id || '';
+      const hasNameFromList = doc.file_metadata?.name || doc.file_name || doc.name || doc.title;
       const hasNameFromSearch = fileNamesByFileId.has(fileId);
       if (fileId && !hasNameFromList && !hasNameFromSearch) {
         docsNeedingNames.push(fileId);
@@ -1444,8 +1449,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
     // ШАГ 3: Обогащаем документы названиями
     const enrichedDocs = allDocuments.map((doc: any, index: number) => {
-      const fileId = doc.file_id || doc.id || '';
-      let fileName = doc.file_name || doc.name || doc.title || '';
+      // List API возвращает данные во вложенной структуре file_metadata
+      const fileId = doc.file_metadata?.file_id || doc.file_id || doc.id || '';
+      let fileName = doc.file_metadata?.name || doc.file_name || doc.name || doc.title || '';
       if (!fileName && fileId) {
         fileName = fileNamesByFileId.get(fileId) || '';
       }
