@@ -66,7 +66,7 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
 
 // Максимальный размер контекста в символах для предотвращения 413 ошибки
 // xAI API имеет ограничение на размер запроса
-const MAX_CONTEXT_SIZE = 120000; // ~30K токенов
+const MAX_CONTEXT_SIZE = 80000; // ~20K токенов - уменьшено для предотвращения 413 ошибки
 
 // Функция для ограничения размера контекста
 function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
@@ -161,8 +161,8 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       retrieval_mode: {
         type: 'hybrid'
       },
-      max_num_results: 30,
-      top_k: 30
+      max_num_results: 15,
+      top_k: 15
     };
 
     console.log('Search request:', JSON.stringify(requestBody));
@@ -217,24 +217,16 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
 
     console.log(`Found ${uniqueFiles.size} unique documents`);
 
-    // ШАГ 3: Для каждого документа загружаем ВСЕ его чанки
-    const enrichedDocuments = await Promise.all(
-      Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
-        // Получаем все чанки документа
-        const allChunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
-
-        // Если дополнительные чанки найдены - используем их, иначе используем начальные
-        const chunks = allChunks.length > meta.initialChunks.length ? allChunks : meta.initialChunks;
-
-        return {
-          fileId,
-          fileName: meta.fileName,
-          score: meta.score,
-          // Объединяем все чанки в полный текст
-          fullContent: chunks.join('\n\n')
-        };
-      })
-    );
+    // ШАГ 3: Используем чанки из результатов поиска (без дополнительных запросов для скорости)
+    const enrichedDocuments = Array.from(uniqueFiles.entries()).map(([fileId, meta]) => {
+      return {
+        fileId,
+        fileName: meta.fileName,
+        score: meta.score,
+        // Используем чанки из результатов поиска
+        fullContent: meta.initialChunks.join('\n\n')
+      };
+    });
 
     // ШАГ 4: Форматируем результаты с полным контекстом документов
     // Извлекаем метаданные из текста для помощи AI
@@ -333,8 +325,8 @@ async function searchWithFullContent(
       retrieval_mode: {
         type: 'hybrid'
       },
-      max_num_results: 30,
-      top_k: 30
+      max_num_results: 10,
+      top_k: 10
     };
 
     const response = await fetch('https://api.x.ai/v1/documents/search', {
