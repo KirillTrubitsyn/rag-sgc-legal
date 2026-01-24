@@ -22,6 +22,8 @@ export interface CollectionConfig {
   useFullContent?: boolean;
   // Примерный размер документа в токенах (для оценки загрузки)
   maxTokensPerDoc?: number;
+  // Максимальное количество результатов поиска (по умолчанию 15)
+  maxSearchResults?: number;
 }
 
 /**
@@ -144,6 +146,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     priority: 5,
     useFullContent: false, // Уставы большие - использовать чанки
     maxTokensPerDoc: 10000,
+    maxSearchResults: 50, // Увеличено для полного охвата разделов о компетенции
     keywords: [
       // Основные термины
       'устав', 'уставн', 'учредительн', 'учредитель',

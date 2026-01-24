@@ -164,10 +164,11 @@ async function getAllChunksForDocument(
 
 // Функция поиска по коллекции через правильный endpoint
 // С загрузкой ВСЕХ чанков найденных документов для полного контекста
-async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
+async function searchCollection(query: string, apiKey: string, collectionId: string, maxResults: number = 15): Promise<string> {
   console.log('=== Collection Search ===');
   console.log('Query:', query);
   console.log('Collection ID:', collectionId);
+  console.log('Max results:', maxResults);
 
   try {
     // ШАГ 1: Первоначальный поиск по запросу
@@ -179,8 +180,8 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       retrieval_mode: {
         type: 'hybrid'
       },
-      max_num_results: 15,
-      top_k: 15
+      max_num_results: maxResults,
+      top_k: maxResults
     };
 
     console.log('Search request:', JSON.stringify(requestBody));
@@ -2269,7 +2270,8 @@ if (isListAll) {
           : '\n\nПоиск по документам не вернул результатов.';
       } else {
         // Для коллекций с большими документами - используем чанки (как раньше)
-        documentResults = await searchCollection(searchQuery, apiKey, collectionId);
+        const maxResults = collectionConfig?.maxSearchResults ?? 15;
+        documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults);
         console.log('Chunk search results length:', documentResults.length);
 
         contextSection = documentResults
