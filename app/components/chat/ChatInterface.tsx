@@ -85,6 +85,14 @@ function SummaryBlock({ text, onExpandTable }: { text: string; onExpandTable?: (
           li: ({ children }) => <li className="ml-2 text-sgc-blue-500">{children}</li>,
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
+          // Inline код
+          code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm text-sgc-blue-700">{children}</code>,
+          // Многострочные блоки кода (pre) - светлый фон для читаемости текста документов
+          pre: ({ children }) => (
+            <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 my-3 overflow-x-auto text-sm text-sgc-blue-700 whitespace-pre-wrap break-words">
+              {children}
+            </pre>
+          ),
           // Компонент для ссылок
           a: ({ href, children }) => {
             const isDownloadLink = href?.includes('/api/download');
@@ -288,6 +296,12 @@ function StructuredResponse({ content, onExpandTable }: { content: string; onExp
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
           code: ({ children }) => <code className="bg-slate-100 px-1 py-0.5 rounded text-sm">{children}</code>,
+          // Многострочные блоки кода (pre) - светлый фон для читаемости
+          pre: ({ children }) => (
+            <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 my-3 overflow-x-auto text-sm text-sgc-blue-700 whitespace-pre-wrap break-words">
+              {children}
+            </pre>
+          ),
           // Компонент для ссылок
           a: ({ href, children }) => {
             const isDownloadLink = href?.includes('/api/download');
