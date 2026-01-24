@@ -71,11 +71,33 @@ function cleanTextForDocx(text: string): string {
   text = text.replace(/^Председатель\s+(юридического\s+)?консилиума.*$/gmi, '');
   text = text.replace(/^Дата составления заключения.*$/gmi, '');
 
+  // Убираем секцию "Ссылки на документы" со всем содержимым
+  // Формат: "Ссылки на документы" или "### Ссылки на документы" и всё до следующей секции
+  text = text.replace(/^#{0,4}\s*Ссылки на документы[\s\S]*?(?=^#{1,4}\s+[А-ЯA-Z]|\n\n[А-ЯA-Z]|$)/gmi, '');
+
+  // Убираем строки с URL ссылками на скачивание (— Этап N, ... — [Скачать](...))
+  text = text.replace(/^[—―-]\s*.*?\[Скачать\]\([^)]+\).*$/gmi, '');
+
   // Убираем разделители
   text = text.replace(/^---+\s*$/gm, '');
 
-  // Убираем markdown bold маркеры
+  // Убираем markdown ссылки: [текст](url) -> текст
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+  // Убираем HTML теги <br>, <br/>, <br />
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+
+  // Убираем другие HTML теги
+  text = text.replace(/<[^>]+>/g, '');
+
+  // Убираем markdown bold маркеры **text** -> text
   text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+
+  // Убираем markdown italic маркеры *text* -> text (но не списки)
+  text = text.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1');
+
+  // Убираем markdown код `text` -> text
+  text = text.replace(/`([^`]+)`/g, '$1');
 
   // Убираем лишние переносы
   text = text.replace(/\n{3,}/g, '\n\n');
