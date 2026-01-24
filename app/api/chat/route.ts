@@ -1174,6 +1174,18 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 
       if (batch.length === 0) break;
 
+      // Логируем структуру первого документа для отладки
+      if (documents.length === 0 && batch.length > 0) {
+        console.log('=== LIST API FIRST DOC ===');
+        console.log('Doc keys:', Object.keys(batch[0]));
+        console.log('Doc sample:', JSON.stringify(batch[0], null, 2).substring(0, 1000));
+        console.log('file_id:', batch[0].file_id);
+        console.log('id:', batch[0].id);
+        console.log('name:', batch[0].name);
+        console.log('file_name:', batch[0].file_name);
+        console.log('=== END LIST API ===');
+      }
+
       documents = documents.concat(batch);
 
       // Продолжаем пагинацию если есть ещё документы
