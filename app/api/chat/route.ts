@@ -237,12 +237,33 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
     );
 
     // ШАГ 4: Форматируем результаты с полным контекстом документов
+    // Извлекаем метаданные из текста для помощи AI
     const formattedResults = enrichedDocuments.map((doc, i) => {
       const encodedFilename = encodeURIComponent(doc.fileName);
       const downloadUrl = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}` : '';
       const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
 
-      return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.fullContent}\n=== КОНЕЦ ДОКУМЕНТА ===`;
+      // Извлекаем метаданные из содержимого документа
+      const extractedMeta = extractPoaFieldsFromContent(doc.fullContent);
+      // Также пробуем извлечь из имени файла
+      const filenameMeta = extractPoaFieldsFromFilename(doc.fileName);
+
+      // Объединяем метаданные (контент имеет приоритет)
+      const fio = extractedMeta.fio !== 'Не указано' ? extractedMeta.fio : filenameMeta.fio;
+      const poaNumber = extractedMeta.poaNumber !== 'Не указано' ? extractedMeta.poaNumber : filenameMeta.poaNumber;
+      const issueDate = extractedMeta.issueDate !== 'Не указано' ? extractedMeta.issueDate : filenameMeta.issueDate;
+      const validUntil = extractedMeta.validUntil !== 'Не указано' ? extractedMeta.validUntil : filenameMeta.validUntil;
+
+      // Формируем блок с извлечёнными метаданными
+      const metadataBlock = `
+=== ИЗВЛЕЧЁННЫЕ МЕТАДАННЫЕ ===
+ФИО: ${fio}
+Номер доверенности: ${poaNumber}
+Дата выдачи: ${issueDate}
+Срок действия до: ${validUntil}
+=== КОНЕЦ МЕТАДАННЫХ ===`;
+
+      return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n${metadataBlock}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.fullContent}\n=== КОНЕЦ ДОКУМЕНТА ===`;
     }).join('\n\n---\n\n');
 
     console.log('Formatted results length:', formattedResults.length);
