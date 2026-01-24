@@ -1101,6 +1101,60 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
   }
 }
 
+// Быстрая функция получения списка документов БЕЗ загрузки контента
+// Используется для больших документов (уставы) чтобы избежать таймаутов
+async function getDocumentsListFast(apiKey: string, collectionId: string): Promise<string> {
+  console.log('=== Get Documents List (Fast mode) ===');
+  console.log('Collection ID:', collectionId);
+
+  try {
+    const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
+    url.searchParams.set('limit', '100');
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('Documents list failed:', response.status);
+      return '';
+    }
+
+    const data = await response.json();
+    const documents = data.data || data.documents || [];
+
+    if (documents.length === 0) {
+      return '';
+    }
+
+    console.log(`Found ${documents.length} documents`);
+
+    // Форматируем список документов только с названиями и ссылками
+    const formattedDocs = documents.map((doc: any, index: number) => {
+      const fileId = doc.file_id || doc.id || '';
+      const fileName = doc.file_name || doc.name || doc.title || 'Документ';
+      const encodedFilename = encodeURIComponent(fileName);
+      const downloadUrl = fileId ? `/api/download?file_id=${fileId}&filename=${encodedFilename}` : '';
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
+
+      return `### ${index + 1}. ${fileName}
+
+Ссылка на скачивание: ${markdownLink}
+
+---`;
+    });
+
+    return formattedDocs.join('\n\n');
+  } catch (error) {
+    console.error('Error in getDocumentsListFast:', error);
+    return '';
+  }
+}
+
 // Функция получения ПОЛНОГО списка всех документов из коллекции
 // Сначала получаем ВСЕ документы через list API, потом ищем контент для метаданных
 async function getAllDocuments(apiKey: string, collectionId: string): Promise<string> {
@@ -1778,20 +1832,35 @@ export async function POST(req: Request) {
     let contextSection: string;
 
 if (isListAll) {
-      // Для запросов о полном списке - получаем ВСЕ документы из коллекции
-      console.log('Fetching ALL documents from collection...');
-      documentResults = await getAllDocuments(apiKey, collectionId);
-      console.log('All documents results length:', documentResults.length);
-
-      // Определяем, какие поля запросил пользователь
-      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
-      const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
-      console.log('Requested table fields:', fields);
+      // Для запросов о полном списке - получаем документы из коллекции
+      console.log('Fetching documents from collection...');
 
       const collectionName = collectionConfig?.displayName || 'документов';
-      contextSection = documentResults
-        ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}\n\nВАЖНО ПРО ССЫЛКИ: Поле "Скачать:" уже содержит ГОТОВУЮ markdown-ссылку [Скачать](URL). КОПИРУЙ её в таблицу ДОСЛОВНО, без изменений!`
-        : `\n\nВ базе данных "${collectionName}" нет документов.`;
+      const useFullContent = collectionConfig?.useFullContent ?? false;
+
+      // Для коллекций с большими документами (уставы и др.) используем быструю функцию
+      // Для POA используем полную функцию с метаданными
+      if (collectionKey === 'poa') {
+        // Для доверенностей - полная загрузка с метаданными
+        documentResults = await getAllDocuments(apiKey, collectionId);
+        console.log('All documents results length:', documentResults.length);
+
+        const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+        const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
+        console.log('Requested table fields:', fields);
+
+        contextSection = documentResults
+          ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}\n\nВАЖНО ПРО ССЫЛКИ: Поле "Скачать:" уже содержит ГОТОВУЮ markdown-ссылку [Скачать](URL). КОПИРУЙ её в таблицу ДОСЛОВНО, без изменений!`
+          : `\n\nВ базе данных "${collectionName}" нет документов.`;
+      } else {
+        // Для других коллекций (уставы, формы договоров) - быстрая загрузка только списка
+        documentResults = await getDocumentsListFast(apiKey, collectionId);
+        console.log('Fast documents list length:', documentResults.length);
+
+        contextSection = documentResults
+          ? `\n\nСПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто список всех документов в базе данных "${collectionName}". Для каждого документа указано название и ссылка на скачивание.`
+          : `\n\nВ базе данных "${collectionName}" нет документов.`;
+      }
     } else {
       // Для обычных запросов - используем поиск
       const searchQuery = buildContextualSearchQuery(messages, 3);
