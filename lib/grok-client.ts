@@ -556,14 +556,14 @@ export const articlesOfAssociationSystemPrompt = `Вы — юридически�
  */
 const COLLECTION_PROMPTS: Record<string, string> = {
   poa: poaSystemPrompt,
-  general: legalSystemPrompt,
+  standardsAndRegulations: legalSystemPrompt,
   contractForms: contractFormsSystemPrompt,
   articlesOfAssociation: articlesOfAssociationSystemPrompt,
 };
 
 /**
  * Получить системный промпт для коллекции
- * @param collectionKey - ключ коллекции (poa, general, contractForms, etc.)
+ * @param collectionKey - ключ коллекции (poa, standardsAndRegulations, contractForms, etc.)
  * @returns системный промпт для указанной коллекции
  */
 export function getSystemPromptForCollection(collectionKey: string): string {
@@ -574,7 +574,7 @@ export function getSystemPromptForCollection(collectionKey: string): string {
   }
 
   // Если промпт не найден, используем общий юридический промпт
-  console.log(`No specific prompt for collection "${collectionKey}", using general prompt`);
+  console.log(`No specific prompt for collection "${collectionKey}", using standardsAndRegulations prompt`);
   return legalSystemPrompt;
 }
 

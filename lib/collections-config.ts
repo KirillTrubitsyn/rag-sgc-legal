@@ -130,14 +130,23 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     ],
   },
 
-  // Общая коллекция (fallback) - всегда последняя по приоритету
-  general: {
-    envKey: 'COLLECTION_ID',
-    displayName: 'Нормативные документы',
-    description: 'Общая коллекция нормативных документов и стандартов СГК',
-    priority: -1, // Самый низкий приоритет - используется как fallback
+  // Стандарты и регламенты (Standards and Regulations)
+  standardsAndRegulations: {
+    envKey: 'STANDARDS_AND_REGULATIONS_COLLECTION_ID',
+    displayName: 'Стандарты и регламенты',
+    description: 'Нормативные документы, стандарты, положения и регламенты СГК',
+    priority: 3,
     useFullContent: false, // Большие документы - использовать чанки
-    keywords: [], // Пустой массив = используется по умолчанию
+    keywords: [
+      // Основные термины
+      'стандарт', 'регламент', 'положени', 'инструкци', 'норматив',
+      'правила', 'порядок', 'методик', 'процедур',
+      // Типы документов
+      'р-гк', 'ст-гк', 'и-гк', 'п-гк', // Коды документов СГК
+      'кадастров', 'мероприят', 'хранени', 'договорн',
+      // Вопросы о документах
+      'какой порядок', 'как оформить', 'какие требования', 'что регламентирует',
+    ],
   },
 };
 
@@ -178,9 +187,9 @@ export function getSortedCollections(): Array<[string, CollectionConfig]> {
 /**
  * Определить коллекцию по тексту запроса
  * @param query - текст запроса пользователя
- * @returns ID коллекции или 'general' если не найдена специфичная
+ * @returns ID коллекции или null если не найдена подходящая
  */
-export function detectCollection(query: string): string {
+export function detectCollection(query: string): string | null {
   const lowerQuery = query.toLowerCase();
 
   // Собираем все совпадения с информацией о длине ключевого слова
@@ -192,9 +201,6 @@ export function detectCollection(query: string): string {
   }> = [];
 
   for (const [collectionId, config] of getSortedCollections()) {
-    // Пропускаем general - он используется как fallback
-    if (collectionId === 'general') continue;
-
     // Находим все совпадающие ключевые слова
     for (const keyword of config.keywords) {
       if (lowerQuery.includes(keyword.toLowerCase())) {
@@ -209,7 +215,8 @@ export function detectCollection(query: string): string {
   }
 
   if (matches.length === 0) {
-    return 'general';
+    // При отсутствии совпадений возвращаем null - требуется уточнение у пользователя
+    return null;
   }
 
   // Сортируем: сначала по длине ключевого слова (длинные = более специфичные),
@@ -223,6 +230,19 @@ export function detectCollection(query: string): string {
   });
 
   return matches[0].collectionId;
+}
+
+/**
+ * Получить список всех коллекций для уточняющего вопроса
+ * @returns строка с перечислением коллекций и их описаний
+ */
+export function getAvailableCollectionsList(): string {
+  const collections = getSortedCollections()
+    .filter(([, config]) => config.keywords.length > 0) // Только коллекции с ключевыми словами
+    .map(([key, config]) => `• **${config.displayName}** — ${config.description}`)
+    .join('\n');
+
+  return collections;
 }
 
 /**

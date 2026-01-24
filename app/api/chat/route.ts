@@ -4,6 +4,7 @@ import {
   isListAllQuery,
   getCollectionId,
   getCollectionConfig,
+  getAvailableCollectionsList,
   COLLECTIONS_CONFIG
 } from '@/lib/collections-config';
 
@@ -12,10 +13,11 @@ export const maxDuration = 60;
 
 // Результат определения запроса
 interface QueryAnalysis {
-  collectionKey: string;      // Ключ коллекции (poa, general, contractForms, etc.)
-  isListAll: boolean;         // Запрос на полный список документов
-  collectionId: string;       // ID коллекции из env
-  systemPrompt: string;       // Системный промпт для коллекции
+  collectionKey: string | null;      // Ключ коллекции (poa, standardsAndRegulations, contractForms, etc.) или null если не определена
+  isListAll: boolean;                // Запрос на полный список документов
+  collectionId: string | null;       // ID коллекции из env или null
+  systemPrompt: string;              // Системный промпт для коллекции
+  needsClarification: boolean;       // Требуется уточнение от пользователя
 }
 
 // Проверка, содержит ли сообщение загруженные документы
@@ -26,7 +28,7 @@ function hasUploadedDocuments(messages: any[]): boolean {
 }
 
 // Анализ запроса пользователя и определение коллекции
-function analyzeQuery(messages: any[]): QueryAnalysis | null {
+function analyzeQuery(messages: any[]): QueryAnalysis {
   // Получаем ТОЛЬКО последнее сообщение для определения коллекции
   // Это предотвращает "загрязнение" контекста предыдущими сообщениями
   const userMessages = messages.filter((m: any) => m.role === 'user');
@@ -41,29 +43,42 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
   // Проверяем, запрашивает ли пользователь полный список
   const isListAll = isListAllQuery(combinedText);
 
+  // Если коллекция не определена - требуется уточнение
+  if (collectionKey === null) {
+    console.log('Collection not detected, clarification needed');
+    return {
+      collectionKey: null,
+      isListAll,
+      collectionId: null,
+      systemPrompt: '',
+      needsClarification: true,
+    };
+  }
+
   // Получаем ID коллекции из переменных окружения
-  let collectionId = getCollectionId(collectionKey);
-  let actualCollectionKey = collectionKey;
+  const collectionId = getCollectionId(collectionKey);
 
-  // Если коллекция не найдена, используем general
+  // Если коллекция найдена, но не настроена в env - тоже требуется уточнение
   if (!collectionId) {
-    console.log(`Collection ${collectionKey} not configured, falling back to general`);
-    actualCollectionKey = 'general';
-    collectionId = getCollectionId('general');
+    console.log(`Collection ${collectionKey} not configured in environment`);
+    return {
+      collectionKey,
+      isListAll,
+      collectionId: null,
+      systemPrompt: '',
+      needsClarification: true,
+    };
   }
 
-  if (!collectionId) {
-    return null;
-  }
-
-  // Получаем системный промпт для коллекции (используем оригинальный collectionKey для промпта)
+  // Получаем системный промпт для коллекции
   const systemPrompt = getSystemPromptForCollection(collectionKey);
 
   return {
-    collectionKey: actualCollectionKey,
+    collectionKey,
     isListAll,
     collectionId,
     systemPrompt,
+    needsClarification: false,
   };
 }
 
@@ -1130,7 +1145,7 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
 const COLLECTION_SEARCH_QUERIES: Record<string, string> = {
   articlesOfAssociation: 'устав общество положение документ организация',
   contractForms: 'договор форма шаблон образец соглашение акт',
-  general: 'документ положение стандарт регламент инструкция',
+  standardsAndRegulations: 'документ положение стандарт регламент инструкция порядок',
 };
 
 async function getDocumentsListFast(apiKey: string, collectionId: string, collectionKey?: string): Promise<string> {
@@ -1210,7 +1225,7 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
     const fileNamesByFileId = new Map<string, string>();
 
     // Выбираем подходящий поисковый запрос для коллекции
-    const searchQuery = COLLECTION_SEARCH_QUERIES[collectionKey || ''] || COLLECTION_SEARCH_QUERIES.general;
+    const searchQuery = COLLECTION_SEARCH_QUERIES[collectionKey || ''] || COLLECTION_SEARCH_QUERIES.standardsAndRegulations;
     console.log('Using search query:', searchQuery);
 
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
@@ -2141,15 +2156,56 @@ export async function POST(req: Request) {
       return createStreamResponse(response);
     }
 
-    if (!queryAnalysis) {
-      console.error('No collection configured');
+    // Проверяем, требуется ли уточнение от пользователя
+    if (queryAnalysis.needsClarification) {
+      console.log('Clarification needed - returning collection list to user');
+      const availableCollections = getAvailableCollectionsList();
+
+      // Формируем уточняющий ответ в формате SSE stream
+      const clarificationMessage = `Не удалось определить, к какой категории документов относится ваш запрос.\n\nУ меня есть следующие коллекции документов:\n${availableCollections}\n\nПожалуйста, уточните, из какой коллекции вы хотите получить информацию, или переформулируйте запрос с использованием ключевых слов.`;
+
+      // Создаём потоковый ответ как от API
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          // Имитируем формат ответа xAI API
+          const chunk = {
+            id: 'clarification',
+            object: 'chat.completion.chunk',
+            created: Date.now(),
+            model: 'system',
+            choices: [{
+              index: 0,
+              delta: { content: clarificationMessage },
+              finish_reason: 'stop'
+            }]
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    const { collectionKey, isListAll, collectionId, systemPrompt } = queryAnalysis;
+
+    // После проверки needsClarification выше, collectionId гарантированно не null
+    if (!collectionId || !collectionKey) {
+      console.error('Unexpected: collectionId or collectionKey is null after clarification check');
       return new Response(
-        JSON.stringify({ error: 'No collection configured' }),
+        JSON.stringify({ error: 'Внутренняя ошибка конфигурации коллекций' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const { collectionKey, isListAll, collectionId, systemPrompt } = queryAnalysis;
     const collectionConfig = getCollectionConfig(collectionKey);
 
     console.log('Query analysis:', {
