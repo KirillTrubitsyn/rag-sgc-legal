@@ -717,9 +717,9 @@ function extractPoaFieldsFromContent(content: string): {
 
   // Извлекаем номер доверенности - более гибкие паттерны
   const numberPatterns = [
-    // Стандартные форматы: КГ-24-127, ТГК-13-2024-001
-    /доверенност[ьи]?\s*№?\s*([А-ЯЁA-Z]{1,5}[-\s]?\d{2,4}[-\s]?\d+)/i,
-    /№\s*([А-ЯЁA-Z]{1,5}[-\s]?\d{2,4}[-\s]?\d+)/i,
+    // Стандартные форматы: КГ-24/34, КГ-24-127, ТГК-13-2024-001
+    /доверенност[ьи]?\s*№?\s*([А-ЯЁA-Z]{1,5}[-\s\/]?\d{2,4}[-\s\/]?\d+)/i,
+    /№\s*([А-ЯЁA-Z]{1,5}[-\s\/]?\d{2,4}[-\s\/]?\d+)/i,
     // Номер с префиксом
     /(?:номер|рег\.?\s*№|per\.?\s*№|№)[:\s]*([А-ЯЁA-Z0-9][\w\-\/]{3,})/i,
     // Простой номер после слова "доверенность"
@@ -796,6 +796,9 @@ function extractPoaFieldsFromContent(content: string): {
     const day = mixedDateMatch[1].padStart(2, '0');
     const month = monthMap[mixedDateMatch[2].toLowerCase()];
     const year = mixedDateMatch[3];
+    const yearNum = parseInt(year, 10);
+    // Пропускаем даты вне диапазона 2020-2050 (скорее всего паспортные данные или даты рождения)
+    if (yearNum < 2020 || yearNum > 2050) continue;
     if (month) {
       const dateStr = `${day}.${month}.${year}`;
       if (!textDates.includes(dateStr)) {
@@ -811,6 +814,9 @@ function extractPoaFieldsFromContent(content: string): {
     const day = quotedDateMatch[1].padStart(2, '0');
     const month = monthMap[quotedDateMatch[2].toLowerCase()];
     const year = quotedDateMatch[3];
+    const yearNum = parseInt(year, 10);
+    // Пропускаем даты вне диапазона 2020-2050
+    if (yearNum < 2020 || yearNum > 2050) continue;
     if (month) {
       const dateStr = `${day}.${month}.${year}`;
       if (!textDates.includes(dateStr)) {
@@ -826,12 +832,29 @@ function extractPoaFieldsFromContent(content: string): {
     const day = cityDateMatch[1].padStart(2, '0');
     const month = monthMap[cityDateMatch[2].toLowerCase()];
     const year = cityDateMatch[3];
+    const yearNum = parseInt(year, 10);
+    // Пропускаем даты вне диапазона 2020-2050
+    if (yearNum < 2020 || yearNum > 2050) continue;
     if (month) {
       const dateStr = `${day}.${month}.${year}`;
       if (!textDates.includes(dateStr)) {
         // Дата после города — скорее всего дата выдачи, добавляем в начало списка
         textDates.unshift(dateStr);
       }
+    }
+  }
+
+  // Ищем даты прописью после названия города: "город Кемерово ... первое марта две тысячи двадцать четвертого года"
+  const cityTextDatePattern = /(?:г\.|город)\s*[А-ЯЁа-яё]+[^а-яё]*([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+две\s+тысячи\s+([а-яё]+(?:\s+[а-яё]+)?)\s+года/gi;
+  let cityTextDateMatch;
+  while ((cityTextDateMatch = cityTextDatePattern.exec(normalizedContent)) !== null) {
+    const parsed = parseRussianTextDate(cityTextDateMatch[0].replace(/^.*?([а-яё]+(?:\s+[а-яё]+)?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/i, '$1 $2'));
+    // Парсим полную дату из матча
+    const fullDateText = `${cityTextDateMatch[1]} ${cityTextDateMatch[2]} две тысячи ${cityTextDateMatch[3]} года`;
+    const parsedDate = parseRussianTextDate(fullDateText);
+    if (parsedDate && !textDates.includes(parsedDate)) {
+      // Дата после города — скорее всего дата выдачи, добавляем в начало списка
+      textDates.unshift(parsedDate);
     }
   }
 
@@ -918,7 +941,11 @@ function extractPoaFieldsFromContent(content: string): {
       if (match) {
         const day = match[1].padStart(2, '0');
         let month = match[2];
-        const year = match[3].length === 2 ? '20' + match[3] : match[3];
+        const yearStr = match[3].length === 2 ? '20' + match[3] : match[3];
+        const yearNum = parseInt(yearStr, 10);
+
+        // Пропускаем даты вне диапазона 2020-2050 (скорее всего паспортные данные или даты рождения)
+        if (yearNum < 2020 || yearNum > 2050) continue;
 
         const monthMap: Record<string, string> = {
           'января': '01', 'февраля': '02', 'марта': '03', 'апреля': '04',
@@ -931,7 +958,7 @@ function extractPoaFieldsFromContent(content: string): {
           month = month.padStart(2, '0');
         }
 
-        result.issueDate = `${day}.${month}.${year}`;
+        result.issueDate = `${day}.${month}.${yearStr}`;
         break;
       }
     }
