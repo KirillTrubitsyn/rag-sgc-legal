@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload, Maximize2, X } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload, Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,6 +36,13 @@ function FullscreenTableModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-sgc-blue-200 bg-gradient-to-r from-sgc-blue-500 to-sgc-blue-600">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <Minimize2 className="w-5 h-5" />
+            <span className="font-medium">Свернуть</span>
+          </button>
           <h3 className="text-lg font-semibold text-white flex items-center gap-2">
             <Maximize2 className="w-5 h-5" />
             Таблица (альбомный вид)
