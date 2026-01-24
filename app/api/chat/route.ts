@@ -82,11 +82,32 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
   };
 }
 
-// Grok 4.1 поддерживает до 2 миллионов токенов - лимит не нужен
-// Функция оставлена для совместимости, но не обрезает контекст
-function truncateContextIfNeeded(context: string, _maxSize?: number): { text: string; wasTruncated: boolean } {
-  // Просто возвращаем полный текст без обрезки
-  return { text: context, wasTruncated: false };
+// Лимит контекста - xAI API имеет ограничение на размер HTTP запроса
+// 300K символов (~75K токенов) - безопасный лимит для API
+const MAX_CONTEXT_SIZE = 300000;
+
+// Функция для ограничения размера контекста
+function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
+  if (context.length <= maxSize) {
+    return { text: context, wasTruncated: false };
+  }
+
+  console.warn(`Context size ${context.length} exceeds limit ${maxSize}, truncating...`);
+
+  // Находим место для обрезки - предпочитаем обрезать на границе документа
+  const truncateAt = context.lastIndexOf('\n---', maxSize);
+
+  if (truncateAt > maxSize * 0.7) {
+    return {
+      text: context.substring(0, truncateAt) + '\n\n[... Часть текста не показана. Задайте более конкретный вопрос. ...]',
+      wasTruncated: true
+    };
+  } else {
+    return {
+      text: context.substring(0, maxSize) + '\n\n[... Текст обрезан. Задайте более конкретный вопрос. ...]',
+      wasTruncated: true
+    };
+  }
 }
 
 // Функция получения ВСЕХ чанков документа по file_id

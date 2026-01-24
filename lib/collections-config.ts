@@ -144,9 +144,9 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Уставы',
     description: 'Уставы организаций группы компаний СГК',
     priority: 5,
-    useFullContent: true, // Загружаем полный текст устава для полных ответов о компетенции
-    maxTokensPerDoc: 50000, // Уставы большие - увеличиваем лимит
-    maxSearchResults: 50,
+    useFullContent: false, // Используем чанки - полный текст слишком большой для API
+    maxTokensPerDoc: 50000,
+    maxSearchResults: 100, // Увеличено для полного охвата разделов о компетенции
     keywords: [
       // Основные термины
       'устав', 'уставн', 'учредительн', 'учредитель',
