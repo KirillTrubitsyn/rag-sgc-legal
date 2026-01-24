@@ -32,16 +32,27 @@ function hasUploadedDocuments(messages: any[]): boolean {
 
 // Анализ запроса пользователя и определение коллекции с помощью LLM
 async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<QueryAnalysis> {
-  // Получаем ТОЛЬКО последнее сообщение для определения коллекции
   const userMessages = messages.filter((m: any) => m.role === 'user');
   const lastMessage = userMessages[userMessages.length - 1]?.content || '';
 
   // Проверяем, запрашивает ли пользователь полный список
   const isListAll = isListAllQuery(lastMessage);
 
+  // Собираем контекст диалога (последние 2-3 сообщения для понимания темы)
+  let conversationContext = '';
+  if (messages.length > 1) {
+    // Берём последние сообщения для контекста (но не более 3 пар user/assistant)
+    const recentMessages = messages.slice(-6);
+    conversationContext = recentMessages
+      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+      .slice(0, -1) // Исключаем последнее (текущее) сообщение
+      .map((m: any) => `${m.role === 'user' ? 'Пользователь' : 'Ассистент'}: ${m.content.substring(0, 500)}${m.content.length > 500 ? '...' : ''}`)
+      .join('\n');
+  }
+
   // Используем LLM для интеллектуальной классификации запроса
-  console.log('Classifying query with LLM...');
-  const classification = await classifyQueryWithLLM(lastMessage, apiKey);
+  console.log('Classifying query with LLM...', { hasContext: !!conversationContext });
+  const classification = await classifyQueryWithLLM(lastMessage, apiKey, conversationContext || undefined);
 
   console.log('LLM Classification result:', {
     collection: classification.collectionKey,
