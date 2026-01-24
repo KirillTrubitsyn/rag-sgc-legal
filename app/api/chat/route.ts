@@ -1134,44 +1134,70 @@ const COLLECTION_SEARCH_QUERIES: Record<string, string> = {
 };
 
 async function getDocumentsListFast(apiKey: string, collectionId: string, collectionKey?: string): Promise<string> {
-  console.log('=== Get Documents List (Fast mode) ===');
+  console.log('=== Get Documents List (Fast mode with pagination) ===');
   console.log('Collection ID:', collectionId, 'Collection Key:', collectionKey);
 
   try {
-    // ШАГ 1: Получаем список документов через list API
-    const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
-    url.searchParams.set('limit', '100');
+    // ШАГ 1: Получаем ВСЕ документы через list API с пагинацией
+    let allDocuments: any[] = [];
+    let cursor: string | null = null;
+    const limit = 100;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    do {
+      const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
+      url.searchParams.set('limit', limit.toString());
+      if (cursor) {
+        url.searchParams.set('starting_after', cursor);
+      }
 
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-    });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    clearTimeout(timeoutId);
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      console.error('Documents list failed:', response.status);
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error('Documents list failed:', response.status);
+        break;
+      }
+
+      const data = await response.json();
+      const documents = data.data || data.documents || [];
+
+      if (documents.length === 0) break;
+
+      // Логируем структуру первого документа для отладки
+      if (allDocuments.length === 0 && documents.length > 0) {
+        console.log('First doc from List API keys:', Object.keys(documents[0]));
+        console.log('First doc sample:', JSON.stringify(documents[0], null, 2).substring(0, 800));
+      }
+
+      allDocuments = allDocuments.concat(documents);
+
+      // Проверяем есть ли ещё страницы
+      if (data.has_more && documents.length > 0) {
+        const lastDoc = documents[documents.length - 1];
+        cursor = lastDoc.file_id || lastDoc.id;
+      } else {
+        cursor = null;
+      }
+    } while (cursor);
+
+    if (allDocuments.length === 0) {
       return '';
     }
 
-    const data = await response.json();
-    const documents = data.data || data.documents || [];
+    console.log(`Found ${allDocuments.length} documents from list API (with pagination)`);
 
-    if (documents.length === 0) {
-      return '';
-    }
-
-    console.log(`Found ${documents.length} documents from list API`);
-
-    // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
-    // Search API возвращает file_name в результатах
+    // ШАГ 2: Получаем названия файлов через Search API
     const fileNamesByFileId = new Map<string, string>();
 
     // Выбираем подходящий поисковый запрос для коллекции
@@ -1212,13 +1238,46 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
           fileNamesByFileId.set(fileId, fileName);
         }
       }
-      console.log(`Found filenames for ${fileNamesByFileId.size} documents`);
+      console.log(`Found filenames for ${fileNamesByFileId.size} documents from Search`);
     }
 
-    // ШАГ 3: Обогащаем документы названиями
-    const enrichedDocs = documents.map((doc: any, index: number) => {
+    // ШАГ 3: Для документов без имён - получаем через Files API (параллельно, батчами по 5)
+    const docsWithoutNames: string[] = [];
+    for (const doc of allDocuments) {
       const fileId = doc.file_id || doc.id || '';
-      // Пробуем получить имя из list API (проверяем все возможные поля), затем из search
+      const hasNameFromList = doc.metadata?.filename || doc.metadata?.file_name || doc.file_name || doc.name || doc.title;
+      const hasNameFromSearch = fileNamesByFileId.has(fileId);
+      if (fileId && !hasNameFromList && !hasNameFromSearch) {
+        docsWithoutNames.push(fileId);
+      }
+    }
+
+    if (docsWithoutNames.length > 0) {
+      console.log(`Fetching names for ${docsWithoutNames.length} documents via Files API`);
+
+      // Обрабатываем батчами по 5 параллельных запросов
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < docsWithoutNames.length; i += BATCH_SIZE) {
+        const batch = docsWithoutNames.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map(fileId => getFileInfo(apiKey, fileId))
+        );
+
+        for (let j = 0; j < batch.length; j++) {
+          const fileId = batch[j];
+          const info = results[j];
+          if (info?.filename) {
+            fileNamesByFileId.set(fileId, info.filename);
+          }
+        }
+      }
+      console.log(`After Files API: found filenames for ${fileNamesByFileId.size} documents total`);
+    }
+
+    // ШАГ 4: Обогащаем документы названиями
+    const enrichedDocs = allDocuments.map((doc: any, index: number) => {
+      const fileId = doc.file_id || doc.id || '';
+      // Пробуем получить имя из list API (проверяем все возможные поля), затем из search/files
       let fileName = doc.metadata?.filename || doc.metadata?.file_name || doc.file_name || doc.name || doc.title || '';
       if (!fileName && fileId) {
         fileName = fileNamesByFileId.get(fileId) || '';
@@ -1226,7 +1285,7 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 
       // Логируем для отладки
       if (index < 3) {
-        console.log(`Doc ${index}: fileId=${fileId}, fileName from list=${doc.metadata?.filename || doc.file_name || doc.name || 'none'}, fileName from search=${fileNamesByFileId.get(fileId) || 'none'}`);
+        console.log(`Doc ${index}: fileId=${fileId}, fileName=${fileName || 'none'}`);
       }
 
       // Убираем расширение файла для красивого отображения названия
@@ -1300,10 +1359,16 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
       if (documents.length === 0) break;
 
+      // Логируем структуру первого документа для отладки
+      if (allDocuments.length === 0 && documents.length > 0) {
+        console.log('First POA doc from List API keys:', Object.keys(documents[0]));
+        console.log('First POA doc sample:', JSON.stringify(documents[0], null, 2).substring(0, 800));
+      }
+
       allDocuments = allDocuments.concat(documents);
 
-      const hasMore = data.has_more || (documents.length === limit);
-      if (hasMore && documents.length > 0) {
+      // Проверяем есть ли ещё страницы - только если API явно говорит has_more
+      if (data.has_more && documents.length > 0) {
         const lastDoc = documents[documents.length - 1];
         cursor = lastDoc.file_id || lastDoc.id;
       } else {
@@ -1315,9 +1380,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       return '';
     }
 
-    console.log(`Found ${allDocuments.length} documents from list API`);
+    console.log(`Found ${allDocuments.length} documents from list API (with pagination)`);
 
-    // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
+    // ШАГ 2: Получаем названия файлов через Search API
     const fileNamesByFileId = new Map<string, string>();
 
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
@@ -1348,10 +1413,43 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
           fileNamesByFileId.set(fileId, fileName);
         }
       }
-      console.log(`Found filenames for ${fileNamesByFileId.size} POA documents`);
+      console.log(`Found filenames for ${fileNamesByFileId.size} POA documents from Search`);
     }
 
-    // ШАГ 3: Обогащаем документы названиями
+    // ШАГ 3: Для документов без имён - получаем через Files API (параллельно, батчами по 5)
+    const docsWithoutNames: string[] = [];
+    for (const doc of allDocuments) {
+      const fileId = doc.file_id || doc.id || '';
+      const hasNameFromList = doc.metadata?.filename || doc.metadata?.file_name || doc.file_name || doc.name || doc.title;
+      const hasNameFromSearch = fileNamesByFileId.has(fileId);
+      if (fileId && !hasNameFromList && !hasNameFromSearch) {
+        docsWithoutNames.push(fileId);
+      }
+    }
+
+    if (docsWithoutNames.length > 0) {
+      console.log(`Fetching names for ${docsWithoutNames.length} POA documents via Files API`);
+
+      // Обрабатываем батчами по 5 параллельных запросов
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < docsWithoutNames.length; i += BATCH_SIZE) {
+        const batch = docsWithoutNames.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map(fileId => getFileInfo(apiKey, fileId))
+        );
+
+        for (let j = 0; j < batch.length; j++) {
+          const fileId = batch[j];
+          const info = results[j];
+          if (info?.filename) {
+            fileNamesByFileId.set(fileId, info.filename);
+          }
+        }
+      }
+      console.log(`After Files API: found filenames for ${fileNamesByFileId.size} POA documents total`);
+    }
+
+    // ШАГ 4: Обогащаем документы названиями
     const enrichedDocs = allDocuments.map((doc: any, index: number) => {
       const fileId = doc.file_id || doc.id || '';
       // Проверяем все возможные поля для имени файла
@@ -1361,7 +1459,7 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       }
 
       if (index < 3) {
-        console.log(`POA Doc ${index}: fileId=${fileId}, fileName=${fileName || 'none'}, metadata=${JSON.stringify(doc.metadata || {})}`);
+        console.log(`POA Doc ${index}: fileId=${fileId}, fileName=${fileName || 'none'}`);
       }
 
       // Извлекаем метаданные из названия файла
