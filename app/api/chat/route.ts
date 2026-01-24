@@ -531,6 +531,7 @@ async function chatWithFileAttachment(
     };
 
     console.log('Sending Responses API request with file attachment...');
+    console.log('Request body:', JSON.stringify(responsesRequestBody, null, 2).substring(0, 1000));
 
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
@@ -541,6 +542,9 @@ async function chatWithFileAttachment(
       body: JSON.stringify(responsesRequestBody),
     });
 
+    console.log('Responses API response status:', response.status);
+    console.log('Responses API response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Responses API error:', response.status, errorText);
@@ -548,7 +552,7 @@ async function chatWithFileAttachment(
       return null;
     }
 
-    console.log('Responses API success, streaming response...');
+    console.log('Responses API success, returning stream response...');
     return response;
 
   } catch (error) {
@@ -2125,52 +2129,122 @@ function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): s
 // Функция для создания streaming response
 /**
  * Создаёт streaming response из Responses API (для file attachments)
- * Responses API возвращает данные в формате SSE с output_text
+ * Responses API возвращает данные в формате SSE
  */
 function createResponsesStreamResponse(response: Response): Response {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let chunkCount = 0;
   let buffer = '';
+  let totalBytesReceived = 0;
+  let currentEventType = '';
+
+  console.log('=== Starting Responses API stream processing ===');
 
   const transformStream = new TransformStream({
     transform(chunk, controller) {
       const text = decoder.decode(chunk, { stream: true });
+      totalBytesReceived += chunk.byteLength;
       buffer += text;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
+      console.log(`Received chunk: ${chunk.byteLength} bytes, total: ${totalBytesReceived}, lines: ${lines.length}`);
+
       for (const line of lines) {
         const trimmedLine = line.trim();
+
+        // Логируем каждую непустую строку
+        if (trimmedLine) {
+          console.log('SSE line:', trimmedLine.substring(0, 300));
+        }
+
+        // Отслеживаем тип события
+        if (trimmedLine.startsWith('event: ')) {
+          currentEventType = trimmedLine.slice(7).trim();
+          console.log('Event type:', currentEventType);
+          continue;
+        }
 
         if (trimmedLine.startsWith('data: ')) {
           const data = trimmedLine.slice(6).trim();
 
           if (data === '[DONE]') {
-            console.log('Responses stream done, total chunks:', chunkCount);
+            console.log('Stream [DONE], total chunks extracted:', chunkCount);
             controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
             return;
           }
 
           try {
             const json = JSON.parse(data);
+            const eventType = json.type || currentEventType || 'unknown';
+            console.log(`JSON event: ${eventType}, keys: ${Object.keys(json).join(',')}`);
 
-            // Responses API использует output_text.text для контента
-            const content = json.output_text?.text ||
-                           json.delta?.content ||
-                           json.choices?.[0]?.delta?.content;
+            // Извлекаем текст из разных форматов ответа
+            let content = null;
 
-            if (content) {
+            // Формат 1: xAI/OpenAI Responses API - response.output_text.delta
+            if (json.type === 'response.output_text.delta' && json.delta) {
+              content = json.delta;
+              console.log('Format: response.output_text.delta');
+            }
+            // Формат 2: Anthropic-style - content_block_delta
+            else if (json.type === 'content_block_delta' && json.delta?.text) {
+              content = json.delta.text;
+              console.log('Format: content_block_delta');
+            }
+            // Формат 3: Chat Completions streaming - choices[].delta.content
+            else if (json.choices?.[0]?.delta?.content !== undefined) {
+              content = json.choices[0].delta.content;
+              console.log('Format: chat.completion.chunk');
+            }
+            // Формат 4: Прямой delta.content
+            else if (json.delta?.content) {
+              content = json.delta.content;
+              console.log('Format: delta.content');
+            }
+            // Формат 5: output_text.text напрямую
+            else if (json.output_text?.text) {
+              content = json.output_text.text;
+              console.log('Format: output_text.text');
+            }
+            // Формат 6: text напрямую в delta
+            else if (json.delta?.text) {
+              content = json.delta.text;
+              console.log('Format: delta.text');
+            }
+            // Формат 7: content напрямую
+            else if (typeof json.content === 'string') {
+              content = json.content;
+              console.log('Format: direct content');
+            }
+            // Формат 8: text напрямую
+            else if (typeof json.text === 'string') {
+              content = json.text;
+              console.log('Format: direct text');
+            }
+
+            if (content !== null && content !== undefined && content !== '') {
               chunkCount++;
               controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+              if (chunkCount <= 3 || chunkCount % 50 === 0) {
+                console.log(`Chunk ${chunkCount}: "${String(content).substring(0, 50)}..."`);
+              }
+            } else if (!['response.created', 'response.in_progress', 'response.output_item.added',
+                        'response.content_part.added', 'response.output_text.done',
+                        'response.content_part.done', 'response.output_item.done',
+                        'response.completed', 'response.done'].includes(json.type)) {
+              // Логируем неизвестные события с контентом
+              console.log('Unknown event with data:', JSON.stringify(json).substring(0, 200));
             }
           } catch (e) {
-            // Skip invalid JSON
+            console.log('JSON parse error for data:', data.substring(0, 100), e);
           }
         }
       }
     },
     flush(controller) {
+      console.log(`Stream flush. Buffer remaining: "${buffer.substring(0, 100)}", total bytes: ${totalBytesReceived}`);
       if (buffer.trim()) {
         const trimmedLine = buffer.trim();
         if (trimmedLine.startsWith('data: ')) {
@@ -2178,10 +2252,20 @@ function createResponsesStreamResponse(response: Response): Response {
           if (data !== '[DONE]') {
             try {
               const json = JSON.parse(data);
-              const content = json.output_text?.text ||
-                             json.delta?.content ||
-                             json.choices?.[0]?.delta?.content;
+              let content = null;
+
+              if (json.type === 'response.output_text.delta' && json.delta) {
+                content = json.delta;
+              } else if (json.choices?.[0]?.delta?.content !== undefined) {
+                content = json.choices[0].delta.content;
+              } else if (json.delta?.content) {
+                content = json.delta.content;
+              } else if (json.delta?.text) {
+                content = json.delta.text;
+              }
+
               if (content) {
+                chunkCount++;
                 controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
               }
             } catch (e) {
@@ -2190,7 +2274,7 @@ function createResponsesStreamResponse(response: Response): Response {
           }
         }
       }
-      console.log('Responses stream flush, sending finish');
+      console.log(`=== Stream complete. Total chunks: ${chunkCount}, bytes: ${totalBytesReceived} ===`);
       controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
     }
   });
