@@ -42,10 +42,12 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
 
   // Получаем ID коллекции из переменных окружения
   let collectionId = getCollectionId(collectionKey);
+  let actualCollectionKey = collectionKey;
 
   // Если коллекция не найдена, используем general
   if (!collectionId) {
     console.log(`Collection ${collectionKey} not configured, falling back to general`);
+    actualCollectionKey = 'general';
     collectionId = getCollectionId('general');
   }
 
@@ -53,11 +55,11 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
     return null;
   }
 
-  // Получаем системный промпт для коллекции
+  // Получаем системный промпт для коллекции (используем оригинальный collectionKey для промпта)
   const systemPrompt = getSystemPromptForCollection(collectionKey);
 
   return {
-    collectionKey,
+    collectionKey: actualCollectionKey,
     isListAll,
     collectionId,
     systemPrompt,
@@ -1111,13 +1113,20 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
     const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
     url.searchParams.set('limit', '100');
 
+    // Добавляем таймаут 15 секунд
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.error('Documents list failed:', response.status);
