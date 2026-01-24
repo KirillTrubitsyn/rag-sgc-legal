@@ -2534,10 +2534,12 @@ if (isListAll) {
       // Для обычных запросов - используем поиск
       const searchQuery = buildContextualSearchQuery(messages, 3);
 
-      // Для уставов - пробуем использовать Responses API с прикреплением файла
+      // Проверяем, нужно ли использовать Responses API с прикреплением файла
       // Это позволяет Grok работать с полным PDF документом
-      if (collectionKey === 'articlesOfAssociation') {
-        console.log('Trying Responses API with file attachment for articlesOfAssociation...');
+      const useFileAttachment = collectionConfig?.useFileAttachment ?? false;
+
+      if (useFileAttachment) {
+        console.log(`Trying Responses API with file attachment for ${collectionKey}...`);
         const fileResponse = await chatWithFileAttachment(
           searchQuery,
           apiKey,

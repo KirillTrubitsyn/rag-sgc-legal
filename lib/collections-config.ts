@@ -24,6 +24,8 @@ export interface CollectionConfig {
   maxTokensPerDoc?: number;
   // Максимальное количество результатов поиска (по умолчанию 15)
   maxSearchResults?: number;
+  // Использовать Responses API с прикреплением файла (для полного анализа документов)
+  useFileAttachment?: boolean;
 }
 
 /**
@@ -82,6 +84,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     description: 'Шаблоны и формы типовых договоров',
     priority: 5,
     useFullContent: true, // Шаблоны обычно небольшие - загружать целиком
+    useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     maxTokensPerDoc: 5000,
     keywords: [
       // Основные термины (единственное и множественное число, падежи)
@@ -145,6 +148,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     description: 'Уставы организаций группы компаний СГК',
     priority: 5,
     useFullContent: false, // Используем чанки - полный текст слишком большой для API
+    useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     maxTokensPerDoc: 50000,
     maxSearchResults: 100, // Увеличено для полного охвата разделов о компетенции
     keywords: [
@@ -218,6 +222,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     description: 'Нормативные документы, стандарты, положения и регламенты СГК',
     priority: 3,
     useFullContent: false, // Большие документы - использовать чанки
+    useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     keywords: [
       // Основные термины
       'стандарт', 'регламент', 'положени', 'инструкци', 'норматив',
