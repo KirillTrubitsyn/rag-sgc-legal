@@ -60,6 +60,10 @@ ${COLLECTION_DESCRIPTIONS}
 
 4. **Вопросы о компетенции органов** ("кто принимает решение", "нужно ли одобрение совета") → articlesOfAssociation
 
+5. **Follow-up запросы** (продолжение диалога):
+   - Если запрос явно продолжает предыдущую тему ("сведи в таблицу", "подробнее", "ещё раз"), используй ту же коллекцию
+   - Такие запросы имеют высокую уверенность, если понятен контекст
+
 ЗАДАЧА:
 Проанализируй запрос пользователя и определи:
 1. О ЧЁМ спрашивает пользователь - о процедуре/порядке действий или о содержании документа?
@@ -68,7 +72,9 @@ ${COLLECTION_DESCRIPTIONS}
 
 Если уверенность < 0.7, нужно уточнение. Сформулируй вежливый уточняющий вопрос.
 
-ЗАПРОС ПОЛЬЗОВАТЕЛЯ:
+{context}
+
+ТЕКУЩИЙ ЗАПРОС ПОЛЬЗОВАТЕЛЯ:
 "{query}"
 
 Ответь СТРОГО в формате JSON:
@@ -81,13 +87,23 @@ ${COLLECTION_DESCRIPTIONS}
 }`;
 
 /**
- * Классифицирует запрос с помощью LLM
+ * Классифицирует запрос с помощью LLM, учитывая контекст диалога
  */
 export async function classifyQueryWithLLM(
   query: string,
-  apiKey: string
+  apiKey: string,
+  conversationContext?: string // Контекст предыдущих сообщений
 ): Promise<ClassificationResult> {
   try {
+    // Формируем контекст для промпта
+    const contextSection = conversationContext
+      ? `КОНТЕКСТ ДИАЛОГА (предыдущие сообщения):\n${conversationContext}\n`
+      : '';
+
+    const prompt = CLASSIFICATION_PROMPT
+      .replace('{context}', contextSection)
+      .replace('{query}', query);
+
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -95,7 +111,7 @@ export async function classifyQueryWithLLM(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'grok-4-1-fast', // Быстрая модель для классификации
+        model: 'grok-4-1-fast',
         messages: [
           {
             role: 'system',
@@ -103,17 +119,16 @@ export async function classifyQueryWithLLM(
           },
           {
             role: 'user',
-            content: CLASSIFICATION_PROMPT.replace('{query}', query)
+            content: prompt
           }
         ],
-        temperature: 0.1, // Низкая температура для консистентности
+        temperature: 0.1,
         max_tokens: 500,
       }),
     });
 
     if (!response.ok) {
       console.error('LLM classification failed:', response.status);
-      // Fallback на ключевые слова
       return fallbackToKeywords(query);
     }
 
@@ -136,17 +151,21 @@ export async function classifyQueryWithLLM(
       reasoning: result.reasoning
     });
 
+    const needsClarification = result.needsClarification || result.confidence < 0.7;
+
     return {
       collectionKey: result.collection,
       confidence: result.confidence || 0.5,
       reasoning: result.reasoning || '',
-      needsClarification: result.needsClarification || result.confidence < 0.7,
-      clarificationQuestion: result.clarificationQuestion || undefined,
+      needsClarification,
+      // Всегда генерируем clarificationQuestion если нужно уточнение
+      clarificationQuestion: needsClarification
+        ? (result.clarificationQuestion || generateClarificationQuestion())
+        : undefined,
     };
 
   } catch (error) {
     console.error('LLM classification error:', error);
-    // Fallback на ключевые слова при ошибке
     return fallbackToKeywords(query);
   }
 }
