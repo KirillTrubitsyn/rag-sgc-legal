@@ -82,35 +82,11 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
   };
 }
 
-// Максимальный размер контекста в символах для предотвращения 413 ошибки
-// xAI API имеет ограничение на размер запроса
-const MAX_CONTEXT_SIZE = 80000; // ~20K токенов - стандартный лимит
-const MAX_CONTEXT_SIZE_LARGE = 200000; // ~50K токенов - для больших документов (уставы)
-
-// Функция для ограничения размера контекста
-function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
-  if (context.length <= maxSize) {
-    return { text: context, wasTruncated: false };
-  }
-
-  console.warn(`Context size ${context.length} exceeds limit ${maxSize}, truncating...`);
-
-  // Находим место для обрезки - предпочитаем обрезать на границе документа
-  const truncateAt = context.lastIndexOf('\n---', maxSize);
-
-  if (truncateAt > maxSize * 0.7) {
-    // Обрезаем на границе документа
-    return {
-      text: context.substring(0, truncateAt) + '\n\n[... Часть документов не показана из-за ограничения размера. Уточните запрос для получения нужной информации. ...]',
-      wasTruncated: true
-    };
-  } else {
-    // Обрезаем просто по размеру
-    return {
-      text: context.substring(0, maxSize) + '\n\n[... Текст обрезан из-за ограничения размера. Уточните запрос для получения нужной информации. ...]',
-      wasTruncated: true
-    };
-  }
+// Grok 4.1 поддерживает до 2 миллионов токенов - лимит не нужен
+// Функция оставлена для совместимости, но не обрезает контекст
+function truncateContextIfNeeded(context: string, _maxSize?: number): { text: string; wasTruncated: boolean } {
+  // Просто возвращаем полный текст без обрезки
+  return { text: context, wasTruncated: false };
 }
 
 // Функция получения ВСЕХ чанков документа по file_id
@@ -2284,13 +2260,8 @@ if (isListAll) {
     // Логируем размер контекста для отладки
     console.log('Context section size:', contextSection.length, 'characters');
 
-    // Ограничиваем размер контекста для предотвращения 413 ошибки
-    // Для уставов используем увеличенный лимит, т.к. они большие и нужен полный текст
-    const contextLimit = collectionKey === 'articlesOfAssociation' ? MAX_CONTEXT_SIZE_LARGE : MAX_CONTEXT_SIZE;
-    const { text: truncatedContext, wasTruncated } = truncateContextIfNeeded(contextSection, contextLimit);
-    if (wasTruncated) {
-      console.log('Context was truncated to:', truncatedContext.length, 'characters (limit:', contextLimit, ')');
-    }
+    // Grok 4.1 поддерживает 2M токенов - лимит не нужен
+    const { text: truncatedContext } = truncateContextIfNeeded(contextSection);
 
     const systemPromptWithContext = systemPrompt + truncatedContext;
     console.log('Total system prompt size:', systemPromptWithContext.length, 'characters');
