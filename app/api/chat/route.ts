@@ -82,11 +82,32 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
   };
 }
 
-// Grok 4.1 поддерживает до 2 миллионов токенов - лимит не нужен
-// Функция оставлена для совместимости, но не обрезает контекст
-function truncateContextIfNeeded(context: string, _maxSize?: number): { text: string; wasTruncated: boolean } {
-  // Просто возвращаем полный текст без обрезки
-  return { text: context, wasTruncated: false };
+// Лимит контекста - xAI API имеет ограничение на размер HTTP запроса
+// 300K символов (~75K токенов) - безопасный лимит для API
+const MAX_CONTEXT_SIZE = 300000;
+
+// Функция для ограничения размера контекста
+function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_SIZE): { text: string; wasTruncated: boolean } {
+  if (context.length <= maxSize) {
+    return { text: context, wasTruncated: false };
+  }
+
+  console.warn(`Context size ${context.length} exceeds limit ${maxSize}, truncating...`);
+
+  // Находим место для обрезки - предпочитаем обрезать на границе документа
+  const truncateAt = context.lastIndexOf('\n---', maxSize);
+
+  if (truncateAt > maxSize * 0.7) {
+    return {
+      text: context.substring(0, truncateAt) + '\n\n[... Часть текста не показана. Задайте более конкретный вопрос. ...]',
+      wasTruncated: true
+    };
+  } else {
+    return {
+      text: context.substring(0, maxSize) + '\n\n[... Текст обрезан. Задайте более конкретный вопрос. ...]',
+      wasTruncated: true
+    };
+  }
 }
 
 // Функция получения ВСЕХ чанков документа по file_id
@@ -415,6 +436,124 @@ async function searchWithFullContent(
   } catch (error) {
     console.error('Search with full content error:', error);
     return '';
+  }
+}
+
+/**
+ * Функция для работы с Responses API с прикреплением файла
+ * Используется для больших документов (уставы) - передаёт PDF напрямую в Grok
+ * @returns объект с результатом или null если нужно использовать обычный поиск
+ */
+async function chatWithFileAttachment(
+  query: string,
+  apiKey: string,
+  collectionId: string,
+  systemPrompt: string,
+  messages: any[]
+): Promise<Response | null> {
+  console.log('=== Chat With File Attachment ===');
+  console.log('Query:', query);
+  console.log('Collection ID:', collectionId);
+
+  try {
+    // ШАГ 1: Поиск для определения релевантного документа
+    const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: query,
+        source: { collection_ids: [collectionId] },
+        retrieval_mode: { type: 'hybrid' },
+        max_num_results: 5,
+        top_k: 5
+      }),
+    });
+
+    if (!searchResponse.ok) {
+      console.error('Search failed:', searchResponse.status);
+      return null;
+    }
+
+    const searchData = await searchResponse.json();
+    const results = searchData.matches || searchData.results || [];
+
+    if (results.length === 0) {
+      console.log('No documents found');
+      return null;
+    }
+
+    // ШАГ 2: Получаем file_id первого (наиболее релевантного) документа
+    const firstResult = results[0];
+    const fileId = firstResult.file_id;
+    const fileName = firstResult.fields?.file_name || firstResult.fields?.name || 'Документ';
+
+    if (!fileId) {
+      console.log('No file_id in search result');
+      return null;
+    }
+
+    console.log(`Found document: ${fileName} (${fileId})`);
+
+    // Создаём ссылку на скачивание
+    const encodedFilename = encodeURIComponent(fileName);
+    const downloadUrl = `/api/download?file_id=${fileId}&filename=${encodedFilename}`;
+    const markdownLink = `[Скачать](${downloadUrl})`;
+
+    // ШАГ 3: Отправляем запрос в Responses API с прикреплённым файлом
+    const userMessages = messages.filter((m: any) => m.role === 'user');
+    const lastUserMessage = userMessages[userMessages.length - 1]?.content || query;
+
+    const responsesRequestBody = {
+      model: 'grok-4-1-fast',
+      stream: true,
+      input: [
+        {
+          role: 'system',
+          content: systemPrompt + `\n\nДокумент для анализа: ${fileName}\nСсылка на скачивание: ${markdownLink}`
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: lastUserMessage
+            },
+            {
+              type: 'input_file',
+              file_id: fileId
+            }
+          ]
+        }
+      ]
+    };
+
+    console.log('Sending Responses API request with file attachment...');
+
+    const response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(responsesRequestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Responses API error:', response.status, errorText);
+      // Возвращаем null чтобы использовать fallback на обычный поиск
+      return null;
+    }
+
+    console.log('Responses API success, streaming response...');
+    return response;
+
+  } catch (error) {
+    console.error('Chat with file attachment error:', error);
+    return null;
   }
 }
 
@@ -1984,6 +2123,85 @@ function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): s
 }
 
 // Функция для создания streaming response
+/**
+ * Создаёт streaming response из Responses API (для file attachments)
+ * Responses API возвращает данные в формате SSE с output_text
+ */
+function createResponsesStreamResponse(response: Response): Response {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let chunkCount = 0;
+  let buffer = '';
+
+  const transformStream = new TransformStream({
+    transform(chunk, controller) {
+      const text = decoder.decode(chunk, { stream: true });
+      buffer += text;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+
+        if (trimmedLine.startsWith('data: ')) {
+          const data = trimmedLine.slice(6).trim();
+
+          if (data === '[DONE]') {
+            console.log('Responses stream done, total chunks:', chunkCount);
+            controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+
+            // Responses API использует output_text.text для контента
+            const content = json.output_text?.text ||
+                           json.delta?.content ||
+                           json.choices?.[0]?.delta?.content;
+
+            if (content) {
+              chunkCount++;
+              controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+            }
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+    },
+    flush(controller) {
+      if (buffer.trim()) {
+        const trimmedLine = buffer.trim();
+        if (trimmedLine.startsWith('data: ')) {
+          const data = trimmedLine.slice(6).trim();
+          if (data !== '[DONE]') {
+            try {
+              const json = JSON.parse(data);
+              const content = json.output_text?.text ||
+                             json.delta?.content ||
+                             json.choices?.[0]?.delta?.content;
+              if (content) {
+                controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+      }
+      console.log('Responses stream flush, sending finish');
+      controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
+    }
+  });
+
+  return new Response(response.body?.pipeThrough(transformStream), {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+    },
+  });
+}
+
 function createStreamResponse(response: Response): Response {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -2231,6 +2449,27 @@ if (isListAll) {
     } else {
       // Для обычных запросов - используем поиск
       const searchQuery = buildContextualSearchQuery(messages, 3);
+
+      // Для уставов - пробуем использовать Responses API с прикреплением файла
+      // Это позволяет Grok работать с полным PDF документом
+      if (collectionKey === 'articlesOfAssociation') {
+        console.log('Trying Responses API with file attachment for articlesOfAssociation...');
+        const fileResponse = await chatWithFileAttachment(
+          searchQuery,
+          apiKey,
+          collectionId,
+          systemPrompt,
+          messages
+        );
+
+        if (fileResponse) {
+          console.log('Using Responses API response');
+          // Трансформируем поток из Responses API в формат Chat Completions
+          return createResponsesStreamResponse(fileResponse);
+        }
+
+        console.log('Responses API failed, falling back to chunk search...');
+      }
 
       // Проверяем, нужно ли использовать полный текст документов
       const useFullContent = collectionConfig?.useFullContent ?? false;
