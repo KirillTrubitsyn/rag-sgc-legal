@@ -1131,10 +1131,10 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
   console.log('Collection ID:', collectionId);
 
   try {
+    // ШАГ 1: Получаем список документов через list API
     const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
     url.searchParams.set('limit', '100');
 
-    // Добавляем таймаут 15 секунд
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -1161,37 +1161,72 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
       return '';
     }
 
-    console.log(`Found ${documents.length} documents`);
+    console.log(`Found ${documents.length} documents from list API`);
 
-    // Обогащаем документы названиями из Files API (параллельно для скорости)
-    const enrichedDocs = await Promise.all(
-      documents.map(async (doc: any, index: number) => {
-        const fileId = doc.file_id || doc.id || '';
-        let fileName = doc.file_name || doc.name || doc.title || '';
+    // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
+    // Search API возвращает file_name в результатах
+    const fileNamesByFileId = new Map<string, string>();
 
-        // Если нет имени - получаем через Files API
-        if (!fileName && fileId) {
-          const fileInfo = await getFileInfo(apiKey, fileId);
-          if (fileInfo?.filename) {
-            fileName = fileInfo.filename;
-          }
-          // Логируем для отладки первых 3 документов
-          if (index < 3) {
-            console.log(`Files API for doc ${index}: fileId=${fileId}, filename=${fileInfo?.filename || 'null'}`);
-          }
+    const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'устав общество положение документ',  // Общий запрос для уставов
+        source: { collection_ids: [collectionId] },
+        retrieval_mode: { type: 'hybrid' },
+        max_num_results: 100,
+        top_k: 100,
+      }),
+    });
+
+    if (searchResponse.ok) {
+      const searchData = await searchResponse.json();
+      const results = searchData.matches || searchData.results || [];
+      console.log(`Search returned ${results.length} results`);
+
+      // Логируем первый результат для отладки
+      if (results.length > 0) {
+        console.log('First search result keys:', Object.keys(results[0]));
+        console.log('First result sample:', JSON.stringify(results[0], null, 2).substring(0, 500));
+      }
+
+      for (const result of results) {
+        const fileId = result.file_id || '';
+        const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
+        if (fileId && fileName && !fileNamesByFileId.has(fileId)) {
+          fileNamesByFileId.set(fileId, fileName);
         }
+      }
+      console.log(`Found filenames for ${fileNamesByFileId.size} documents`);
+    }
 
-        // Убираем расширение файла для красивого отображения названия
-        const displayName = fileName
-          ? fileName.replace(/\.(pdf|docx?|xlsx?|txt|rtf)$/i, '')
-          : 'Документ';
+    // ШАГ 3: Обогащаем документы названиями
+    const enrichedDocs = documents.map((doc: any, index: number) => {
+      const fileId = doc.file_id || doc.id || '';
+      // Пробуем получить имя из list API, затем из search
+      let fileName = doc.file_name || doc.name || doc.title || '';
+      if (!fileName && fileId) {
+        fileName = fileNamesByFileId.get(fileId) || '';
+      }
 
-        return { fileId, fileName: fileName || 'Документ', displayName };
-      })
-    );
+      // Логируем для отладки
+      if (index < 3) {
+        console.log(`Doc ${index}: fileId=${fileId}, fileName from list=${doc.file_name || doc.name || 'none'}, fileName from search=${fileNamesByFileId.get(fileId) || 'none'}`);
+      }
+
+      // Убираем расширение файла для красивого отображения названия
+      const displayName = fileName
+        ? fileName.replace(/\.(pdf|docx?|xlsx?|txt|rtf)$/i, '')
+        : 'Документ';
+
+      return { fileId, fileName: fileName || 'Документ', displayName };
+    });
 
     // Форматируем список документов только с названиями и ссылками
-    const formattedDocs = enrichedDocs.map((doc, index: number) => {
+    const formattedDocs = enrichedDocs.map((doc: { fileId: string; fileName: string; displayName: string }, index: number) => {
       const encodedFilename = encodeURIComponent(doc.fileName);
       const downloadUrl = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}` : '';
       const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
@@ -1268,33 +1303,60 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       return '';
     }
 
-    console.log(`Found ${allDocuments.length} documents`);
+    console.log(`Found ${allDocuments.length} documents from list API`);
 
-    // Обогащаем документы названиями из Files API (параллельно для скорости)
-    const enrichedDocs = await Promise.all(
-      allDocuments.map(async (doc: any, index: number) => {
-        const fileId = doc.file_id || doc.id || '';
-        let fileName = doc.file_name || doc.name || doc.title || '';
+    // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
+    const fileNamesByFileId = new Map<string, string>();
 
-        // Если нет имени - получаем через Files API
-        if (!fileName && fileId) {
-          const fileInfo = await getFileInfo(apiKey, fileId);
-          if (fileInfo?.filename) {
-            fileName = fileInfo.filename;
-          }
-          if (index < 3) {
-            console.log(`Files API for POA doc ${index}: fileId=${fileId}, filename=${fileInfo?.filename || 'null'}`);
-          }
+    const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'доверенность уполномочивает представлять интересы',
+        source: { collection_ids: [collectionId] },
+        retrieval_mode: { type: 'hybrid' },
+        max_num_results: 100,
+        top_k: 100,
+      }),
+    });
+
+    if (searchResponse.ok) {
+      const searchData = await searchResponse.json();
+      const results = searchData.matches || searchData.results || [];
+      console.log(`Search returned ${results.length} results for POA`);
+
+      for (const result of results) {
+        const fileId = result.file_id || '';
+        const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
+        if (fileId && fileName && !fileNamesByFileId.has(fileId)) {
+          fileNamesByFileId.set(fileId, fileName);
         }
+      }
+      console.log(`Found filenames for ${fileNamesByFileId.size} POA documents`);
+    }
 
-        // Извлекаем метаданные из названия файла
-        const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+    // ШАГ 3: Обогащаем документы названиями
+    const enrichedDocs = allDocuments.map((doc: any, index: number) => {
+      const fileId = doc.file_id || doc.id || '';
+      let fileName = doc.file_name || doc.name || doc.title || '';
+      if (!fileName && fileId) {
+        fileName = fileNamesByFileId.get(fileId) || '';
+      }
 
-        return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
-      })
-    );
+      if (index < 3) {
+        console.log(`POA Doc ${index}: fileId=${fileId}, fileName=${fileName || 'none'}`);
+      }
 
-    console.log(`Enriched ${enrichedDocs.length} documents`);
+      // Извлекаем метаданные из названия файла
+      const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+
+      return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
+    });
+
+    console.log(`Enriched ${enrichedDocs.length} POA documents`);
 
     // Форматируем в формате, который ожидает система для POA
     const formattedResults = enrichedDocs.map((doc, i) => {
