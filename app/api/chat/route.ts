@@ -1210,6 +1210,112 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
   }
 }
 
+// Быстрая версия для доверенностей - извлекает метаданные только из названий файлов
+// без выполнения множества поисковых запросов (которые вызывают timeout)
+async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Promise<string> {
+  console.log('=== Get Documents List Fast (POA mode) ===');
+  console.log('Collection ID:', collectionId);
+
+  try {
+    // Получаем список документов (с пагинацией)
+    let allDocuments: any[] = [];
+    let cursor: string | null = null;
+    const limit = 100;
+
+    do {
+      const url = new URL(`https://api.x.ai/v1/collections/${collectionId}/documents`);
+      url.searchParams.set('limit', limit.toString());
+      if (cursor) {
+        url.searchParams.set('starting_after', cursor);
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error('Documents list failed:', response.status);
+        break;
+      }
+
+      const data = await response.json();
+      const documents = data.data || data.documents || [];
+
+      if (documents.length === 0) break;
+
+      allDocuments = allDocuments.concat(documents);
+
+      const hasMore = data.has_more || (documents.length === limit);
+      if (hasMore && documents.length > 0) {
+        const lastDoc = documents[documents.length - 1];
+        cursor = lastDoc.file_id || lastDoc.id;
+      } else {
+        cursor = null;
+      }
+    } while (cursor);
+
+    if (allDocuments.length === 0) {
+      return '';
+    }
+
+    console.log(`Found ${allDocuments.length} documents`);
+
+    // Обогащаем документы названиями из Files API (параллельно для скорости)
+    const enrichedDocs = await Promise.all(
+      allDocuments.map(async (doc: any, index: number) => {
+        const fileId = doc.file_id || doc.id || '';
+        let fileName = doc.file_name || doc.name || doc.title || '';
+
+        // Если нет имени - получаем через Files API
+        if (!fileName && fileId) {
+          const fileInfo = await getFileInfo(apiKey, fileId);
+          if (fileInfo?.filename) {
+            fileName = fileInfo.filename;
+          }
+          if (index < 3) {
+            console.log(`Files API for POA doc ${index}: fileId=${fileId}, filename=${fileInfo?.filename || 'null'}`);
+          }
+        }
+
+        // Извлекаем метаданные из названия файла
+        const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+
+        return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
+      })
+    );
+
+    console.log(`Enriched ${enrichedDocs.length} documents`);
+
+    // Форматируем в формате, который ожидает система для POA
+    const formattedResults = enrichedDocs.map((doc, i) => {
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = doc.fileId
+        ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}`
+        : '';
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : 'Нет ссылки';
+
+      return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | Скачать: ${markdownLink}`;
+    }).join('\n');
+
+    const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${enrichedDocs.length}`;
+    return formattedResults + summary;
+
+  } catch (error) {
+    console.error('Error in getDocumentsListFastPOA:', error);
+    return '';
+  }
+}
+
 // Функция получения ПОЛНОГО списка всех документов из коллекции
 // Сначала получаем ВСЕ документы через list API, потом ищем контент для метаданных
 async function getAllDocuments(apiKey: string, collectionId: string): Promise<string> {
@@ -1894,11 +2000,11 @@ if (isListAll) {
       const useFullContent = collectionConfig?.useFullContent ?? false;
 
       // Для коллекций с большими документами (уставы и др.) используем быструю функцию
-      // Для POA используем полную функцию с метаданными
+      // Для POA используем оптимизированную быструю функцию с метаданными из названий файлов
       if (collectionKey === 'poa') {
-        // Для доверенностей - полная загрузка с метаданными
-        documentResults = await getAllDocuments(apiKey, collectionId);
-        console.log('All documents results length:', documentResults.length);
+        // Для доверенностей - быстрая загрузка с метаданными из названий файлов
+        documentResults = await getDocumentsListFastPOA(apiKey, collectionId);
+        console.log('Fast POA documents results length:', documentResults.length);
 
         const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
         const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
