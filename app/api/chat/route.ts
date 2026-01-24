@@ -153,7 +153,7 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       console.log('First result fields:', JSON.stringify(results[0].fields || {}).substring(0, 500));
     }
 
-    // Форматируем результаты поиска с file_id для скачивания
+    // Форматируем результаты поиска с готовой markdown-ссылкой
     const formattedResults = results.map((r: any, i: number) => {
       // Контент в chunk_content
       const content = r.chunk_content || r.content || r.text || '';
@@ -163,7 +163,12 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       // file_id для ссылки на скачивание
       const fileId = r.file_id || '';
 
-      return `[${i + 1}] ${fileName} (релевантность: ${score}, file_id: ${fileId}):\n${content}`;
+      // Создаём готовую markdown-ссылку с закодированным URL
+      const encodedFilename = encodeURIComponent(fileName);
+      const downloadUrl = fileId ? `/api/download?file_id=${fileId}&filename=${encodedFilename}` : '';
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
+
+      return `[${i + 1}] ${fileName} (релевантность: ${score}):\n${content}\nСсылка на скачивание: ${markdownLink}`;
     }).join('\n\n---\n\n');
 
     return formattedResults;
@@ -291,9 +296,14 @@ async function searchWithFullContent(
     const validResults = fullContentResults.filter(r => r.content.length > 0);
     console.log('Documents with content:', validResults.length);
 
-    // ШАГ 4: Форматируем результаты с полным текстом
+    // ШАГ 4: Форматируем результаты с полным текстом и готовой ссылкой
     const formattedResults = validResults.map((r, i) => {
-      return `[${i + 1}] ${r.fileName} (релевантность: ${r.score.toFixed(3)}, file_id: ${r.fileId}):\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${r.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
+      // Создаём готовую markdown-ссылку с закодированным URL
+      const encodedFilename = encodeURIComponent(r.fileName);
+      const downloadUrl = r.fileId ? `/api/download?file_id=${r.fileId}&filename=${encodedFilename}` : '';
+      const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
+
+      return `[${i + 1}] ${r.fileName} (релевантность: ${r.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${r.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
     }).join('\n\n---\n\n');
 
     console.log('Formatted results length:', formattedResults.length);
