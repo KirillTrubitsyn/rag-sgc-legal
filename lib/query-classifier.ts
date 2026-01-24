@@ -95,7 +95,7 @@ export async function classifyQueryWithLLM(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'grok-3-fast', // Быстрая модель для классификации
+        model: 'grok-4-1-fast', // Быстрая модель для классификации
         messages: [
           {
             role: 'system',
