@@ -94,15 +94,65 @@ function truncateContextIfNeeded(context: string, maxSize: number = MAX_CONTEXT_
   }
 }
 
+// Функция получения ВСЕХ чанков документа по file_id
+async function getAllChunksForDocument(
+  apiKey: string,
+  collectionId: string,
+  fileId: string,
+  fileName: string
+): Promise<string[]> {
+  const chunks: string[] = [];
+
+  try {
+    // Поиск всех чанков документа по имени файла
+    // Используем имя файла как запрос, чтобы получить все его чанки
+    const response = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: fileName, // Ищем по имени файла
+        source: { collection_ids: [collectionId] },
+        retrieval_mode: { type: 'keyword' }, // Keyword для точного совпадения
+        max_num_results: 50,
+        top_k: 50
+      }),
+    });
+
+    if (!response.ok) return chunks;
+
+    const data = await response.json();
+    const results = data.matches || data.results || [];
+
+    // Фильтруем только чанки от нужного file_id
+    for (const r of results) {
+      if (r.file_id === fileId) {
+        const content = r.chunk_content || r.content || r.text || '';
+        if (content && !chunks.includes(content)) {
+          chunks.push(content);
+        }
+      }
+    }
+
+    console.log(`Found ${chunks.length} chunks for file ${fileId}`);
+  } catch (error) {
+    console.error(`Error fetching chunks for ${fileId}:`, error);
+  }
+
+  return chunks;
+}
+
 // Функция поиска по коллекции через правильный endpoint
+// С загрузкой ВСЕХ чанков найденных документов для полного контекста
 async function searchCollection(query: string, apiKey: string, collectionId: string): Promise<string> {
   console.log('=== Collection Search ===');
   console.log('Query:', query);
   console.log('Collection ID:', collectionId);
 
   try {
-    // Правильная структура запроса для xAI Documents Search API
-    // Увеличено до 30 результатов для полноты цитат (по замечаниям тестировщиков)
+    // ШАГ 1: Первоначальный поиск по запросу
     const requestBody = {
       query: query,
       source: {
@@ -136,9 +186,7 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
 
     const data = await response.json();
     console.log('Search response keys:', Object.keys(data));
-    console.log('Search response preview:', JSON.stringify(data).substring(0, 1500));
 
-    // xAI возвращает результаты в поле "matches"
     const results = data.matches || data.results || [];
     console.log('Search returned', results.length, 'results');
 
@@ -147,30 +195,57 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
       return '';
     }
 
-    // Логируем первый результат для отладки
-    if (results[0]) {
-      console.log('First result keys:', Object.keys(results[0]));
-      console.log('First result fields:', JSON.stringify(results[0].fields || {}).substring(0, 500));
+    // ШАГ 2: Собираем уникальные file_id и их метаданные
+    const uniqueFiles = new Map<string, { fileName: string; score: number; initialChunks: string[] }>();
+
+    for (const r of results) {
+      const fileId = r.file_id || '';
+      const fileName = r.fields?.file_name || r.fields?.name || r.fields?.title || r.name || 'Документ';
+      const content = r.chunk_content || r.content || r.text || '';
+      const score = r.score || 0;
+
+      if (fileId) {
+        if (!uniqueFiles.has(fileId)) {
+          uniqueFiles.set(fileId, { fileName, score, initialChunks: [] });
+        }
+        const file = uniqueFiles.get(fileId)!;
+        if (content && !file.initialChunks.includes(content)) {
+          file.initialChunks.push(content);
+        }
+      }
     }
 
-    // Форматируем результаты поиска с готовой markdown-ссылкой
-    const formattedResults = results.map((r: any, i: number) => {
-      // Контент в chunk_content
-      const content = r.chunk_content || r.content || r.text || '';
-      // Название файла в fields
-      const fileName = r.fields?.file_name || r.fields?.name || r.fields?.title || r.name || 'Документ';
-      const score = r.score ? r.score.toFixed(3) : '';
-      // file_id для ссылки на скачивание
-      const fileId = r.file_id || '';
+    console.log(`Found ${uniqueFiles.size} unique documents`);
 
-      // Создаём готовую markdown-ссылку с закодированным URL
-      const encodedFilename = encodeURIComponent(fileName);
-      const downloadUrl = fileId ? `/api/download?file_id=${fileId}&filename=${encodedFilename}` : '';
+    // ШАГ 3: Для каждого документа загружаем ВСЕ его чанки
+    const enrichedDocuments = await Promise.all(
+      Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
+        // Получаем все чанки документа
+        const allChunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
+
+        // Если дополнительные чанки найдены - используем их, иначе используем начальные
+        const chunks = allChunks.length > meta.initialChunks.length ? allChunks : meta.initialChunks;
+
+        return {
+          fileId,
+          fileName: meta.fileName,
+          score: meta.score,
+          // Объединяем все чанки в полный текст
+          fullContent: chunks.join('\n\n')
+        };
+      })
+    );
+
+    // ШАГ 4: Форматируем результаты с полным контекстом документов
+    const formattedResults = enrichedDocuments.map((doc, i) => {
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}` : '';
       const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
 
-      return `[${i + 1}] ${fileName} (релевантность: ${score}):\n${content}\nСсылка на скачивание: ${markdownLink}`;
+      return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.fullContent}\n=== КОНЕЦ ДОКУМЕНТА ===`;
     }).join('\n\n---\n\n');
 
+    console.log('Formatted results length:', formattedResults.length);
     return formattedResults;
   } catch (error) {
     console.error('Search error:', error);
