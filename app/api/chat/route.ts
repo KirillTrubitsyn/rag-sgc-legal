@@ -7,6 +7,7 @@ import {
   getAvailableCollectionsList,
   COLLECTIONS_CONFIG
 } from '@/lib/collections-config';
+import { classifyQueryWithLLM, type ClassificationResult } from '@/lib/query-classifier';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -18,6 +19,8 @@ interface QueryAnalysis {
   collectionId: string | null;       // ID коллекции из env или null
   systemPrompt: string;              // Системный промпт для коллекции
   needsClarification: boolean;       // Требуется уточнение от пользователя
+  clarificationQuestion?: string;    // Уточняющий вопрос от LLM (если needsClarification=true)
+  classificationReasoning?: string;  // Объяснение выбора коллекции (для отладки)
 }
 
 // Проверка, содержит ли сообщение загруженные документы
@@ -27,25 +30,77 @@ function hasUploadedDocuments(messages: any[]): boolean {
   return lastUserMessage.content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
 }
 
-// Анализ запроса пользователя и определение коллекции
-function analyzeQuery(messages: any[]): QueryAnalysis {
+// Анализ запроса пользователя и определение коллекции с помощью LLM
+async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<QueryAnalysis> {
   // Получаем ТОЛЬКО последнее сообщение для определения коллекции
-  // Это предотвращает "загрязнение" контекста предыдущими сообщениями
   const userMessages = messages.filter((m: any) => m.role === 'user');
   const lastMessage = userMessages[userMessages.length - 1]?.content || '';
 
-  // Для определения коллекции используем только последнее сообщение
-  const combinedText = lastMessage;
-
-  // Определяем коллекцию по ключевым словам
-  const collectionKey = detectCollection(combinedText);
-
   // Проверяем, запрашивает ли пользователь полный список
-  const isListAll = isListAllQuery(combinedText);
+  const isListAll = isListAllQuery(lastMessage);
 
-  // Если коллекция не определена - требуется уточнение
+  // Используем LLM для интеллектуальной классификации запроса
+  console.log('Classifying query with LLM...');
+  const classification = await classifyQueryWithLLM(lastMessage, apiKey);
+
+  console.log('LLM Classification result:', {
+    collection: classification.collectionKey,
+    confidence: classification.confidence,
+    reasoning: classification.reasoning,
+    needsClarification: classification.needsClarification
+  });
+
+  // Если LLM не уверен или требуется уточнение
+  if (classification.needsClarification || !classification.collectionKey) {
+    console.log('Clarification needed based on LLM analysis');
+    return {
+      collectionKey: null,
+      isListAll,
+      collectionId: null,
+      systemPrompt: '',
+      needsClarification: true,
+      clarificationQuestion: classification.clarificationQuestion,
+      classificationReasoning: classification.reasoning,
+    };
+  }
+
+  // Получаем ID коллекции из переменных окружения
+  const collectionId = getCollectionId(classification.collectionKey);
+
+  // Если коллекция найдена LLM, но не настроена в env
+  if (!collectionId) {
+    console.log(`Collection ${classification.collectionKey} not configured in environment`);
+    return {
+      collectionKey: classification.collectionKey,
+      isListAll,
+      collectionId: null,
+      systemPrompt: '',
+      needsClarification: true,
+      classificationReasoning: classification.reasoning,
+    };
+  }
+
+  // Получаем системный промпт для коллекции
+  const systemPrompt = getSystemPromptForCollection(classification.collectionKey);
+
+  return {
+    collectionKey: classification.collectionKey,
+    isListAll,
+    collectionId,
+    systemPrompt,
+    needsClarification: false,
+    classificationReasoning: classification.reasoning,
+  };
+}
+
+// Быстрый анализ по ключевым словам (fallback или для простых случаев)
+function analyzeQueryFast(messages: any[]): QueryAnalysis {
+  const userMessages = messages.filter((m: any) => m.role === 'user');
+  const lastMessage = userMessages[userMessages.length - 1]?.content || '';
+  const isListAll = isListAllQuery(lastMessage);
+  const collectionKey = detectCollection(lastMessage);
+
   if (collectionKey === null) {
-    console.log('Collection not detected, clarification needed');
     return {
       collectionKey: null,
       isListAll,
@@ -55,12 +110,8 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
     };
   }
 
-  // Получаем ID коллекции из переменных окружения
   const collectionId = getCollectionId(collectionKey);
-
-  // Если коллекция найдена, но не настроена в env - тоже требуется уточнение
   if (!collectionId) {
-    console.log(`Collection ${collectionKey} not configured in environment`);
     return {
       collectionKey,
       isListAll,
@@ -70,9 +121,7 @@ function analyzeQuery(messages: any[]): QueryAnalysis {
     };
   }
 
-  // Получаем системный промпт для коллекции
   const systemPrompt = getSystemPromptForCollection(collectionKey);
-
   return {
     collectionKey,
     isListAll,
@@ -2373,10 +2422,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Анализируем запрос и определяем коллекцию
-    const queryAnalysis = analyzeQuery(messages);
+    // Анализируем запрос и определяем коллекцию с помощью LLM
+    const queryAnalysis = await analyzeQueryWithLLM(messages, apiKey);
 
-// Проверяем загруженные документы в первую очередь
+    // Проверяем загруженные документы в первую очередь
     const isUploadedDocumentRequest = hasUploadedDocuments(messages);
 
     if (isUploadedDocumentRequest) {
@@ -2438,11 +2487,18 @@ export async function POST(req: Request) {
 
     // Проверяем, требуется ли уточнение от пользователя
     if (queryAnalysis.needsClarification) {
-      console.log('Clarification needed - returning collection list to user');
-      const availableCollections = getAvailableCollectionsList();
+      console.log('Clarification needed - LLM analysis:', queryAnalysis.classificationReasoning);
 
-      // Формируем уточняющий ответ в формате SSE stream
-      const clarificationMessage = `Не удалось определить, к какой категории документов относится ваш запрос.\n\nУ меня есть следующие коллекции документов:\n${availableCollections}\n\nПожалуйста, уточните, из какой коллекции вы хотите получить информацию, или переформулируйте запрос с использованием ключевых слов.`;
+      // Используем уточняющий вопрос от LLM или стандартный
+      let clarificationMessage: string;
+      if (queryAnalysis.clarificationQuestion) {
+        // LLM сформулировал уточняющий вопрос
+        clarificationMessage = queryAnalysis.clarificationQuestion;
+      } else {
+        // Fallback на стандартное сообщение
+        const availableCollections = getAvailableCollectionsList();
+        clarificationMessage = `Не удалось определить, к какой категории документов относится ваш запрос.\n\nУ меня есть следующие коллекции документов:\n${availableCollections}\n\nПожалуйста, уточните, из какой коллекции вы хотите получить информацию.`;
+      }
 
       // Создаём потоковый ответ как от API
       const encoder = new TextEncoder();
