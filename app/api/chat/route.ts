@@ -37,19 +37,25 @@ function analyzeQuery(messages: any[]): QueryAnalysis | null {
 
   // Определяем коллекцию по ключевым словам
   const collectionKey = detectCollection(combinedText);
+  console.log('=== Query Analysis ===');
+  console.log('Last message:', combinedText.substring(0, 100));
+  console.log('Detected collection key:', collectionKey);
 
   // Проверяем, запрашивает ли пользователь полный список
   const isListAll = isListAllQuery(combinedText);
+  console.log('Is list all query:', isListAll);
 
   // Получаем ID коллекции из переменных окружения
   let collectionId = getCollectionId(collectionKey);
   let actualCollectionKey = collectionKey;
+  console.log('Collection ID from env:', collectionId ? `${collectionId.substring(0, 30)}...` : 'NOT FOUND');
 
   // Если коллекция не найдена, используем general
   if (!collectionId) {
-    console.log(`Collection ${collectionKey} not configured, falling back to general`);
+    console.log(`⚠️ Collection ${collectionKey} not configured, falling back to general`);
     actualCollectionKey = 'general';
     collectionId = getCollectionId('general');
+    console.log('Fallback collection ID:', collectionId ? `${collectionId.substring(0, 30)}...` : 'NOT FOUND');
   }
 
   if (!collectionId) {
@@ -1150,18 +1156,21 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error('Documents list failed:', response.status);
+      const errorText = await response.text();
+      console.error('Documents list failed:', response.status, errorText);
       return '';
     }
 
     const data = await response.json();
+    console.log('Documents list response keys:', Object.keys(data));
     const documents = data.data || data.documents || [];
 
     if (documents.length === 0) {
+      console.log('No documents found in response');
       return '';
     }
 
-    console.log(`Found ${documents.length} documents`);
+    console.log(`Found ${documents.length} documents in collection`);
 
     // Форматируем список документов только с названиями и ссылками
     const formattedDocs = documents.map((doc: any, index: number) => {

@@ -1,13 +1,33 @@
 import { NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const testCollection = searchParams.get('collection') || 'poa';
+
   const apiKey = process.env.XAI_API_KEY;
-  const collectionId = process.env.POA_COLLECTION_ID || process.env.COLLECTION_ID;
+
+  // Получаем все collection IDs
+  const allCollections = {
+    poa: process.env.POA_COLLECTION_ID,
+    general: process.env.COLLECTION_ID,
+    articlesOfAssociation: process.env.ARTICLES_OF_ASSOCIATION_COLLECTION_ID,
+    contractForms: process.env.CONTRACT_FORMS_COLLECTION_ID,
+  };
+
+  // Выбираем коллекцию для тестирования
+  const collectionId = allCollections[testCollection as keyof typeof allCollections] || allCollections.poa || allCollections.general;
 
   const results: Record<string, unknown> = {
     config: {
       hasApiKey: !!apiKey,
+      testedCollection: testCollection,
       collectionId: collectionId || 'NOT SET',
+      allCollections: {
+        poa: allCollections.poa ? `${allCollections.poa.substring(0, 20)}...` : 'NOT SET',
+        general: allCollections.general ? `${allCollections.general.substring(0, 20)}...` : 'NOT SET',
+        articlesOfAssociation: allCollections.articlesOfAssociation ? `${allCollections.articlesOfAssociation.substring(0, 20)}...` : 'NOT SET',
+        contractForms: allCollections.contractForms ? `${allCollections.contractForms.substring(0, 20)}...` : 'NOT SET',
+      },
     },
   };
 
