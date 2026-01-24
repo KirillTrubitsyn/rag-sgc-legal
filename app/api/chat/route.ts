@@ -27,12 +27,13 @@ function hasUploadedDocuments(messages: any[]): boolean {
 
 // Анализ запроса пользователя и определение коллекции
 function analyzeQuery(messages: any[]): QueryAnalysis | null {
-  // Получаем последние 3 сообщения пользователя для анализа контекста
-  const userMessages = messages
-    .filter((m: any) => m.role === 'user')
-    .slice(-3);
+  // Получаем ТОЛЬКО последнее сообщение для определения коллекции
+  // Это предотвращает "загрязнение" контекста предыдущими сообщениями
+  const userMessages = messages.filter((m: any) => m.role === 'user');
+  const lastMessage = userMessages[userMessages.length - 1]?.content || '';
 
-  const combinedText = userMessages.map((m: any) => m.content).join(' ');
+  // Для определения коллекции используем только последнее сообщение
+  const combinedText = lastMessage;
 
   // Определяем коллекцию по ключевым словам
   const collectionKey = detectCollection(combinedText);
