@@ -1163,15 +1163,40 @@ async function getDocumentsListFast(apiKey: string, collectionId: string): Promi
 
     console.log(`Found ${documents.length} documents`);
 
+    // Обогащаем документы названиями из Files API (параллельно для скорости)
+    const enrichedDocs = await Promise.all(
+      documents.map(async (doc: any, index: number) => {
+        const fileId = doc.file_id || doc.id || '';
+        let fileName = doc.file_name || doc.name || doc.title || '';
+
+        // Если нет имени - получаем через Files API
+        if (!fileName && fileId) {
+          const fileInfo = await getFileInfo(apiKey, fileId);
+          if (fileInfo?.filename) {
+            fileName = fileInfo.filename;
+          }
+          // Логируем для отладки первых 3 документов
+          if (index < 3) {
+            console.log(`Files API for doc ${index}: fileId=${fileId}, filename=${fileInfo?.filename || 'null'}`);
+          }
+        }
+
+        // Убираем расширение файла для красивого отображения названия
+        const displayName = fileName
+          ? fileName.replace(/\.(pdf|docx?|xlsx?|txt|rtf)$/i, '')
+          : 'Документ';
+
+        return { fileId, fileName: fileName || 'Документ', displayName };
+      })
+    );
+
     // Форматируем список документов только с названиями и ссылками
-    const formattedDocs = documents.map((doc: any, index: number) => {
-      const fileId = doc.file_id || doc.id || '';
-      const fileName = doc.file_name || doc.name || doc.title || 'Документ';
-      const encodedFilename = encodeURIComponent(fileName);
-      const downloadUrl = fileId ? `/api/download?file_id=${fileId}&filename=${encodedFilename}` : '';
+    const formattedDocs = enrichedDocs.map((doc, index: number) => {
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}` : '';
       const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
 
-      return `### ${index + 1}. ${fileName}
+      return `### ${index + 1}. ${doc.displayName}
 
 Ссылка на скачивание: ${markdownLink}
 
