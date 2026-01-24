@@ -238,21 +238,39 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
 
     // ШАГ 4: Форматируем результаты с полным контекстом документов
     // Извлекаем метаданные из текста для помощи AI
-    const formattedResults = enrichedDocuments.map((doc, i) => {
+    const formattedResultsArray = await Promise.all(enrichedDocuments.map(async (doc, i) => {
       const encodedFilename = encodeURIComponent(doc.fileName);
       const downloadUrl = doc.fileId ? `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}` : '';
       const markdownLink = downloadUrl ? `[Скачать](${downloadUrl})` : '';
 
-      // Извлекаем метаданные из содержимого документа
-      const extractedMeta = extractPoaFieldsFromContent(doc.fullContent);
+      // Извлекаем метаданные из содержимого документа (чанки)
+      let extractedMeta = extractPoaFieldsFromContent(doc.fullContent);
       // Также пробуем извлечь из имени файла
       const filenameMeta = extractPoaFieldsFromFilename(doc.fileName);
 
       // Объединяем метаданные (контент имеет приоритет)
-      const fio = extractedMeta.fio !== 'Не указано' ? extractedMeta.fio : filenameMeta.fio;
-      const poaNumber = extractedMeta.poaNumber !== 'Не указано' ? extractedMeta.poaNumber : filenameMeta.poaNumber;
-      const issueDate = extractedMeta.issueDate !== 'Не указано' ? extractedMeta.issueDate : filenameMeta.issueDate;
-      const validUntil = extractedMeta.validUntil !== 'Не указано' ? extractedMeta.validUntil : filenameMeta.validUntil;
+      let fio = extractedMeta.fio !== 'Не указано' ? extractedMeta.fio : filenameMeta.fio;
+      let poaNumber = extractedMeta.poaNumber !== 'Не указано' ? extractedMeta.poaNumber : filenameMeta.poaNumber;
+      let issueDate = extractedMeta.issueDate !== 'Не указано' ? extractedMeta.issueDate : filenameMeta.issueDate;
+      let validUntil = extractedMeta.validUntil !== 'Не указано' ? extractedMeta.validUntil : filenameMeta.validUntil;
+
+      // FALLBACK: Если дата выдачи не найдена, пробуем загрузить полный текст файла через Files API
+      // Это помогает, когда заголовок документа (с датой) не попал в поисковые чанки
+      if (issueDate === 'Не указано' && doc.fileId) {
+        console.log(`Дата не найдена в чанках для ${doc.fileName}, пробуем Files API...`);
+        const fullFileContent = await getFullDocumentContent(apiKey, doc.fileId);
+        if (fullFileContent && fullFileContent.length > 0) {
+          const fullMeta = extractPoaFieldsFromContent(fullFileContent);
+          if (fullMeta.issueDate !== 'Не указано') {
+            issueDate = fullMeta.issueDate;
+            console.log(`Дата найдена через Files API: ${issueDate}`);
+          }
+          // Также обновляем другие поля если они не были найдены
+          if (fio === 'Не указано' && fullMeta.fio !== 'Не указано') fio = fullMeta.fio;
+          if (poaNumber === 'Не указано' && fullMeta.poaNumber !== 'Не указано') poaNumber = fullMeta.poaNumber;
+          if (validUntil === 'Не указано' && fullMeta.validUntil !== 'Не указано') validUntil = fullMeta.validUntil;
+        }
+      }
 
       // Формируем блок с извлечёнными метаданными
       const metadataBlock = `
@@ -264,7 +282,8 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
 === КОНЕЦ МЕТАДАННЫХ ===`;
 
       return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n${metadataBlock}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.fullContent}\n=== КОНЕЦ ДОКУМЕНТА ===`;
-    }).join('\n\n---\n\n');
+    }));
+    const formattedResults = formattedResultsArray.join('\n\n---\n\n');
 
     console.log('Formatted results length:', formattedResults.length);
     return formattedResults;
