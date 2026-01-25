@@ -18,7 +18,7 @@ async function ocrWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-4-1-fast',  // Лучшая точность OCR, меньше галлюцинаций
+      model: 'grok-2-vision-latest',  // Vision-модель для OCR
       messages: [
         {
           role: 'user',
@@ -91,7 +91,7 @@ async function analyzeDocumentWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-4-1-fast',  // Лучшая точность OCR, меньше галлюцинаций
+      model: 'grok-2-vision-latest',  // Vision-модель для OCR
       messages: [
         {
           role: 'user',
