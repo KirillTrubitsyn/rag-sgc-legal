@@ -4,7 +4,45 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { FileUploadResult, ACCEPTED_FILE_TYPES, MAX_FILE_SIZE, MAX_PHOTOS } from '@/lib/file-types';
 import { Paperclip, Camera, Loader2, X, Mic, Square } from 'lucide-react';
 
-// Функция загрузки файла на сервер
+// Retry configuration for mobile uploads
+const UPLOAD_MAX_RETRIES = 3;
+const UPLOAD_INITIAL_DELAY_MS = 1000;
+
+// Helper function for delay
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Check if error is retryable (network errors, server errors)
+function isRetryableError(error: unknown, status?: number): boolean {
+  // Network errors
+  if (error instanceof TypeError && error.message.includes('fetch')) {
+    return true;
+  }
+
+  // Connection errors (common on mobile)
+  const errorMessage = error instanceof Error ? error.message : '';
+  if (
+    errorMessage.includes('network') ||
+    errorMessage.includes('Load failed') ||
+    errorMessage.includes('Failed to fetch') ||
+    errorMessage.includes('NetworkError') ||
+    errorMessage.includes('ECONNRESET') ||
+    errorMessage.includes('timeout') ||
+    errorMessage.includes('abort')
+  ) {
+    return true;
+  }
+
+  // Server errors (5xx) and rate limits (429)
+  if (status && (status >= 500 || status === 429)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Функция загрузки файла на сервер с retry логикой
 async function uploadFile(file: File): Promise<FileUploadResult> {
   console.log('Uploading file:', file.name, 'size:', file.size, 'type:', file.type);
 
@@ -16,23 +54,60 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch('/api/upload', {
-    method: 'POST',
-    body: formData,
-  });
+  let lastError: Error | null = null;
 
-  if (!res.ok) {
-    let errorMessage = 'Ошибка загрузки файла';
+  for (let attempt = 0; attempt < UPLOAD_MAX_RETRIES; attempt++) {
     try {
-      const error = await res.json();
-      errorMessage = error.error || errorMessage;
-    } catch {
-      errorMessage = `Ошибка сервера: ${res.status}`;
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      // Client errors (4xx except 429) are not retryable
+      if (!res.ok) {
+        if (!isRetryableError(null, res.status)) {
+          let errorMessage = 'Ошибка загрузки файла';
+          try {
+            const error = await res.json();
+            errorMessage = error.error || errorMessage;
+          } catch {
+            errorMessage = `Ошибка сервера: ${res.status}`;
+          }
+          throw new Error(errorMessage);
+        }
+
+        // Server error or rate limit - retry
+        lastError = new Error(`Ошибка сервера (${res.status})`);
+
+        if (attempt < UPLOAD_MAX_RETRIES - 1) {
+          const delayMs = UPLOAD_INITIAL_DELAY_MS * Math.pow(2, attempt);
+          console.log(`Upload retry ${attempt + 1}/${UPLOAD_MAX_RETRIES} after ${delayMs}ms`);
+          await delay(delayMs);
+          continue;
+        }
+      }
+
+      return res.json();
+
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if error is retryable
+      if (!isRetryableError(error)) {
+        throw lastError;
+      }
+
+      // Retry with exponential backoff
+      if (attempt < UPLOAD_MAX_RETRIES - 1) {
+        const delayMs = UPLOAD_INITIAL_DELAY_MS * Math.pow(2, attempt);
+        console.log(`Upload retry ${attempt + 1}/${UPLOAD_MAX_RETRIES} after ${delayMs}ms due to: ${lastError.message}`);
+        await delay(delayMs);
+      }
     }
-    throw new Error(errorMessage);
   }
 
-  return res.json();
+  // All retries exhausted
+  throw new Error(lastError?.message || 'Не удалось загрузить файл. Проверьте соединение.');
 }
 
 // === FILE BUTTON ===
@@ -58,7 +133,13 @@ export function FileButton({ onFileProcessed, disabled }: FileButtonProps) {
       const result = await uploadFile(file);
       onFileProcessed(result);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Ошибка загрузки');
+      const errorMessage = err instanceof Error ? err.message : 'Ошибка загрузки';
+      // More helpful message for mobile network issues
+      if (errorMessage.includes('Load failed') || errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        alert('Ошибка сети. Не сворачивайте приложение во время загрузки.');
+      } else {
+        alert(errorMessage);
+      }
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
