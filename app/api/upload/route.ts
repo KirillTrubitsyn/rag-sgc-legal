@@ -3,7 +3,7 @@ import { getFileType, getImageMimeType, type FileUploadResult } from '@/lib/file
 export const runtime = 'edge';
 export const maxDuration = 120;
 
-// OCR через Grok Vision (grok-4.1-fast поддерживает vision)
+// OCR через Grok 4 Vision для точного распознавания текста
 async function ocrWithGrok(
   base64Image: string,
   mimeType: string,
@@ -18,7 +18,7 @@ async function ocrWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-2-vision-latest',  // Vision-модель для OCR
+      model: 'grok-4',  // Grok 4 с встроенной поддержкой vision
       messages: [
         {
           role: 'user',
@@ -91,7 +91,7 @@ async function analyzeDocumentWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-2-vision-latest',  // Vision-модель для OCR
+      model: 'grok-4',  // Grok 4 с встроенной поддержкой vision
       messages: [
         {
           role: 'user',
