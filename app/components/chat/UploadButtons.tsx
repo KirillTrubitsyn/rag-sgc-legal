@@ -6,6 +6,13 @@ import { Paperclip, Camera, Loader2, X } from 'lucide-react';
 
 // Функция загрузки файла на сервер
 async function uploadFile(file: File): Promise<FileUploadResult> {
+  console.log('Uploading file:', file.name, 'size:', file.size, 'type:', file.type);
+
+  // Проверка валидности файла
+  if (!file || !file.name || file.size === 0) {
+    throw new Error('Файл пустой или повреждён');
+  }
+
   const formData = new FormData();
   formData.append('file', file);
 
@@ -15,8 +22,14 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
   });
 
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Ошибка загрузки файла');
+    let errorMessage = 'Ошибка загрузки файла';
+    try {
+      const error = await res.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      errorMessage = `Ошибка сервера: ${res.status}`;
+    }
+    throw new Error(errorMessage);
   }
 
   return res.json();

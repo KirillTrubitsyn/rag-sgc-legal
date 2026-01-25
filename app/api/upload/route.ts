@@ -172,6 +172,7 @@ ${text.substring(0, 2000)}
 
 export async function POST(req: Request) {
   console.log('=== Upload API called ===');
+  console.log('Content-Type:', req.headers.get('content-type'));
 
   try {
     const googleApiKey = process.env.GOOGLE_API_KEY;
@@ -184,12 +185,34 @@ export async function POST(req: Request) {
       );
     }
 
-    const formData = await req.formData();
+    // Парсинг formData с обработкой ошибок
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (parseError) {
+      console.error('FormData parse error:', parseError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Ошибка чтения данных формы' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const file = formData.get('file') as File | null;
+    console.log('FormData entries:', [...formData.keys()]);
 
     if (!file) {
+      console.error('File is null, formData keys:', [...formData.keys()]);
       return new Response(
-        JSON.stringify({ success: false, error: 'Файл не загружен' }),
+        JSON.stringify({ success: false, error: 'Файл не загружен. Попробуйте ещё раз.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Проверка на валидный файл
+    if (!file.name || file.size === 0) {
+      console.error('Invalid file: name=', file.name, 'size=', file.size);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Пустой или повреждённый файл' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
