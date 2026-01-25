@@ -443,7 +443,7 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
 }
 
 export default function ChatInterface() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput, append } = useChat({
     api: '/api/chat',
   });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -544,33 +544,31 @@ export default function ChatInterface() {
     e.preventDefault();
 
     const documentContext = getDocumentContext();
+    const currentInput = input.trim();
+
+    if (!currentInput && !documentContext) {
+      return; // Ничего не отправляем если нет ни текста ни документов
+    }
 
     if (documentContext) {
       // Если есть документы, добавляем их в начало сообщения
-      const messageWithContext = `[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]\n${documentContext}\n[КОНЕЦ ЗАГРУЖЕННЫХ ДОКУМЕНТОВ]\n\nВОПРОС ПОЛЬЗОВАТЕЛЯ: ${input}`;
+      const messageWithContext = `[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]\n${documentContext}\n[КОНЕЦ ЗАГРУЖЕННЫХ ДОКУМЕНТОВ]\n\nВОПРОС ПОЛЬЗОВАТЕЛЯ: ${currentInput}`;
 
-      // Очищаем загруженные файлы после отправки
+      // Очищаем загруженные файлы и input после отправки
       setUploadedFiles([]);
       setCapturedPhotos([]);
+      setInput('');
 
-      // Создаем событие с модифицированным input
-      const fakeEvent = {
-        ...e,
-        preventDefault: () => {},
-      } as React.FormEvent;
-
-      // Временно меняем input и отправляем
-      setInput(messageWithContext);
-
-      // Используем setTimeout чтобы дать React обновить state
-      setTimeout(() => {
-        handleSubmit(fakeEvent);
-      }, 0);
+      // Используем append для прямой отправки сообщения (без проблем с состоянием)
+      append({
+        role: 'user',
+        content: messageWithContext,
+      });
     } else {
       // Если нет документов, отправляем как обычно
       handleSubmit(e);
     }
-  }, [input, getDocumentContext, handleSubmit, setInput]);
+  }, [input, getDocumentContext, handleSubmit, setInput, append]);
 
   // Проверяем, есть ли документы для отправки
   const hasDocuments = uploadedFiles.length > 0 || capturedPhotos.some(p => p.result);

@@ -26,8 +26,23 @@ interface QueryAnalysis {
 // Проверка, содержит ли сообщение загруженные документы
 function hasUploadedDocuments(messages: any[]): boolean {
   const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-  if (!lastUserMessage) return false;
-  return lastUserMessage.content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
+  if (!lastUserMessage) {
+    console.log('hasUploadedDocuments: no user message found');
+    return false;
+  }
+
+  const content = typeof lastUserMessage.content === 'string'
+    ? lastUserMessage.content
+    : JSON.stringify(lastUserMessage.content);
+
+  const hasMarker = content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
+  console.log('hasUploadedDocuments:', {
+    hasMarker,
+    contentLength: content.length,
+    contentPreview: content.substring(0, 200) + (content.length > 200 ? '...' : '')
+  });
+
+  return hasMarker;
 }
 
 // Анализ запроса пользователя и определение коллекции с помощью LLM
