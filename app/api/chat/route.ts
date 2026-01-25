@@ -2452,11 +2452,52 @@ export async function POST(req: Request) {
     const isUploadedDocumentRequest = hasUploadedDocuments(messages);
 
     if (isUploadedDocumentRequest) {
-      console.log('Using uploaded document mode - skipping collection routing');
+      console.log('Using uploaded document mode with knowledge base search');
+
+      // Извлекаем текст загруженного документа для поиска
+      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+      const uploadedContent = lastUserMessage?.content || '';
+
+      // Извлекаем ключевые данные для поиска по базе знаний
+      let knowledgeBaseContext = '';
+
+      // Проверяем, похож ли документ на доверенность
+      const isPoaDocument = /доверенност|уполномоч|полномочи/i.test(uploadedContent);
+
+      if (isPoaDocument) {
+        console.log('Uploaded document looks like a POA - searching knowledge base');
+
+        // Извлекаем номер доверенности и ФИО для поиска
+        const poaNumberMatch = uploadedContent.match(/(?:доверенност[ьи]?\s*)?№?\s*([А-ЯA-Z]{1,4}[-\s]?\d{1,4}[-/]?\d{0,4})/i);
+        const fioMatch = uploadedContent.match(/(?:уполномочивает|доверяет|представител[ья])\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)/i);
+
+        const searchTerms = [];
+        if (poaNumberMatch) searchTerms.push(poaNumberMatch[1]);
+        if (fioMatch) searchTerms.push(fioMatch[1]);
+
+        // Получаем ID коллекции доверенностей
+        const poaCollectionId = process.env.POA_COLLECTION_ID;
+
+        if (poaCollectionId && searchTerms.length > 0) {
+          const searchQuery = searchTerms.join(' ');
+          console.log('Searching POA collection for:', searchQuery);
+
+          try {
+            const searchResults = await searchCollection(searchQuery, apiKey, poaCollectionId, 5);
+            if (searchResults) {
+              knowledgeBaseContext = `\n\n=== РЕЗУЛЬТАТЫ ПОИСКА В БАЗЕ ДОВЕРЕННОСТЕЙ ===\n${searchResults}\n=== КОНЕЦ РЕЗУЛЬТАТОВ ПОИСКА ===`;
+              console.log('Found matching documents in knowledge base');
+            }
+          } catch (e) {
+            console.error('Error searching knowledge base:', e);
+          }
+        }
+      }
 
       // Для загруженных документов используем специальный промпт
       const systemPromptWithContext = uploadedDocumentSystemPrompt +
-        '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в сообщении пользователя.';
+        '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в сообщении пользователя.' +
+        (knowledgeBaseContext ? `\n\nЕсли пользователь спрашивает, есть ли документ в базе — сравни загруженный документ с результатами поиска ниже. Если номер доверенности или ФИО совпадают — документ ЕСТЬ в базе.${knowledgeBaseContext}` : '');
 
       const apiMessages = messages.map((m: any) => ({
         role: m.role,
