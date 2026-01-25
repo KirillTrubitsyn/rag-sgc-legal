@@ -2511,33 +2511,20 @@ export async function POST(req: Request) {
         clarificationMessage = `Не удалось определить, к какой категории документов относится ваш запрос.\n\nУ меня есть следующие коллекции документов:\n${availableCollections}\n\nПожалуйста, уточните, из какой коллекции вы хотите получить информацию.`;
       }
 
-      // Создаём потоковый ответ как от API
+      // Создаём потоковый ответ в формате Vercel AI SDK
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         start(controller) {
-          // Имитируем формат ответа xAI API
-          const chunk = {
-            id: 'clarification',
-            object: 'chat.completion.chunk',
-            created: Date.now(),
-            model: 'system',
-            choices: [{
-              index: 0,
-              delta: { content: clarificationMessage },
-              finish_reason: 'stop'
-            }]
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          // Формат Vercel AI SDK: 0:JSON_STRING\n для текста, d:{"finishReason":"stop"}\n для завершения
+          controller.enqueue(encoder.encode(`0:${JSON.stringify(clarificationMessage)}\n`));
+          controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
           controller.close();
         }
       });
 
       return new Response(stream, {
         headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
+          'Content-Type': 'text/plain; charset=utf-8',
         },
       });
     }
