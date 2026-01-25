@@ -917,47 +917,56 @@ function extractPoaFieldsFromContent(content: string): {
   const normalizedContent = content.replace(/\s+/g, ' ');
 
   // Извлекаем ФИО - ищем паттерны типа "Иванов Иван Иванович", "Иванов И.И."
+  // Слова, которые НЕ могут быть частью ФИО (организации, должности, юридические термины)
+  const nonNameWords = /федеральн|государствен|предприяти|учреждени|организаци|компани|общество|ассоциаци|министерств|управлени|департамент|комитет|агентств|служб[аы]|ООО|ОАО|ЗАО|ПАО|генеральн|директор|президент|председател|акционерн|муниципальн|унитарн|бюджетн|казённ|автономн/i;
+
   const fioPatterns = [
-    // Полное ФИО: Иванов Иван Иванович
-    /(?:уполномочива(?:ет|ю)|доверя(?:ет|ю)|настоящей\s+доверенностью)[^\n]{0,50}?([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
-    /(?:представител[а-яё]*|гражданин[а-яё]*|лицо)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
-    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)(?:\s*,?\s*(?:паспорт|дата\s+рождения|проживающ|зарегистрир))/i,
+    // Самый точный паттерн: ФИО в родительном падеже после "уполномочивает:" с паспортом
+    /уполномочива(?:ет|ю)[:\s]*\n?\s*([А-ЯЁ][а-яё]+а?\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:ича|овича|евича|овну|евну|ича))\s*,?\s*паспорт/i,
+    // ФИО в родительном падеже после "уполномочивает" (Рябцева Сергея Владимировича)
+    /уполномочива(?:ет|ю)[:\s]*\n?\s*([А-ЯЁ][а-яё]+а\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:ича|овича|евича|овну|евну))/i,
+    // Полное ФИО после "уполномочивает" (более широкий захват)
+    /(?:уполномочива(?:ет|ю)|доверя(?:ет|ю))[:\s]*\n?\s*([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
+    // ФИО с паспортом (надёжный признак человека)
+    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s*,?\s*паспорт/i,
+    /(?:представител[а-яё]*|гражданин[а-яё]*)[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/i,
     // Сокращённое ФИО: Иванов И.И. или Иванов И. И.
     /(?:на\s+имя|выдана|представител[а-яё]*)[:\s]*([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
     /(?:уполномочива|доверя)[^\n]{0,30}?([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/i,
-    // Любое полное ФИО в тексте (три слова с заглавной буквы подряд)
-    /\b([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,})\b/,
   ];
   for (const pattern of fioPatterns) {
     const match = normalizedContent.match(pattern);
     if (match && match[1]) {
-      // Проверяем, что это не название организации
       const candidate = match[1].trim();
-      if (!/(ООО|ОАО|ЗАО|ПАО|АО|компани|организаци|общество)/i.test(candidate)) {
+      // Проверяем, что это не название организации или должность
+      if (!nonNameWords.test(candidate)) {
         result.fio = candidate;
         break;
       }
     }
   }
 
-  // Извлекаем номер доверенности - более гибкие паттерны
+  // Извлекаем номер доверенности - более строгие паттерны
   const numberPatterns = [
-    // Стандартные форматы: КГ-24/34, КГ-24-127, ТГК-13-2024-001
-    /доверенност[ьи]?\s*№?\s*([А-ЯЁA-Z]{1,5}[-\s\/]?\d{2,4}[-\s\/]?\d+)/i,
-    /№\s*([А-ЯЁA-Z]{1,5}[-\s\/]?\d{2,4}[-\s\/]?\d+)/i,
-    // Номер с префиксом (должен содержать цифры)
-    /(?:номер|рег\.?\s*№|per\.?\s*№|№)[:\s]*([А-ЯЁA-Z0-9]*\d+[\w\-\/]*)/i,
-    // Простой номер после слова "доверенность" (должен содержать цифры)
-    /доверенност[ьи]?\s+№?\s*([А-ЯЁA-Z]{1,5}[-\/]?\d+[-\/]?\d*)/i,
-    // Номер в формате 123/2024
-    /№\s*(\d+\/\d{4})/i,
+    // Самый точный: ДОВЕРЕННОСТЬ № КГ-24/103 или ДОВЕРЕННОСТЬ №КГ-24-103
+    /ДОВЕРЕННОСТЬ\s*№\s*([А-ЯЁA-Z]{2,5}[-\s]?\d{2}[-\/]\d+)/i,
+    // Доверенность № с буквенно-цифровым номером
+    /доверенност[ьи]?\s*№\s*([А-ЯЁA-Z]{2,5}[-\/]?\d{2,4}[-\/]\d+)/i,
+    // Номер в формате КГ-24/103, КГ-24-127
+    /№\s*([А-ЯЁA-Z]{2,5}[-\/]\d{2,4}[-\/]\d+)/i,
+    // Стандартные форматы без слеша: КГ-24-127, ТГК-13-2024-001
+    /доверенност[ьи]?\s*№?\s*([А-ЯЁA-Z]{2,5}-\d{2,4}-\d+)/i,
+    /№\s*([А-ЯЁA-Z]{2,5}-\d{2,4}-\d+)/i,
   ];
   for (const pattern of numberPatterns) {
     const match = normalizedContent.match(pattern);
-    // Проверяем, что результат содержит хотя бы одну цифру (чтобы исключить слова типа "ВЫДАНА")
-    if (match && match[1] && match[1].length > 3 && /\d/.test(match[1])) {
-      result.poaNumber = match[1].trim().toUpperCase().replace(/\s+/g, '-');
-      break;
+    if (match && match[1]) {
+      const num = match[1].trim().toUpperCase().replace(/\s+/g, '-');
+      // Проверяем, что номер содержит буквы И цифры (исключает чисто числовые пункты типа "147-")
+      if (/[А-ЯЁA-Z]/.test(num) && /\d/.test(num) && num.length >= 5) {
+        result.poaNumber = num;
+        break;
+      }
     }
   }
 
@@ -1783,6 +1792,110 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
       return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
     });
+
+    // ШАГ 3.5: Для документов с неполными метаданными - делаем целевые поиски
+    // Это особенно важно для больших документов (20+ страниц)
+    const docsNeedingMoreData = enrichedDocs.filter(doc =>
+      doc.fio === 'Не указано' || doc.poaNumber === 'Не указано' ||
+      doc.issueDate === 'Не указано' || doc.validUntil === 'Не указано'
+    );
+
+    if (docsNeedingMoreData.length > 0) {
+      console.log(`Found ${docsNeedingMoreData.length} docs with incomplete metadata, fetching targeted chunks...`);
+
+      const BATCH_SIZE = 3;
+      for (let i = 0; i < docsNeedingMoreData.length; i += BATCH_SIZE) {
+        const batch = docsNeedingMoreData.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(batch.map(async (doc) => {
+          const targetedChunks: string[] = [];
+
+          // Поиск 1: Первая страница с номером и ФИО
+          if (doc.fio === 'Не указано' || doc.poaNumber === 'Не указано' || doc.issueDate === 'Не указано') {
+            try {
+              const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  query: 'ДОВЕРЕННОСТЬ № настоящей доверенностью уполномочивает',
+                  source: { collection_ids: [collectionId], file_ids: [doc.fileId] },
+                  retrieval_mode: { type: 'hybrid' },
+                  max_num_results: 3,
+                  top_k: 3,
+                }),
+              });
+
+              if (searchResponse.ok) {
+                const data = await searchResponse.json();
+                const results = data.matches || data.results || [];
+                for (const result of results) {
+                  const content = result.chunk_content || result.content || result.text || '';
+                  if (content) targetedChunks.push(content);
+                }
+              }
+            } catch (err) {
+              console.error(`Targeted search 1 failed for ${doc.fileId}:`, err);
+            }
+          }
+
+          // Поиск 2: Срок действия
+          if (doc.validUntil === 'Не указано') {
+            try {
+              const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  query: 'доверенность выдана сроком по до года включительно',
+                  source: { collection_ids: [collectionId], file_ids: [doc.fileId] },
+                  retrieval_mode: { type: 'hybrid' },
+                  max_num_results: 3,
+                  top_k: 3,
+                }),
+              });
+
+              if (searchResponse.ok) {
+                const data = await searchResponse.json();
+                const results = data.matches || data.results || [];
+                for (const result of results) {
+                  const content = result.chunk_content || result.content || result.text || '';
+                  if (content) targetedChunks.push(content);
+                }
+              }
+            } catch (err) {
+              console.error(`Targeted search 2 failed for ${doc.fileId}:`, err);
+            }
+          }
+
+          // Извлекаем метаданные из целевых чанков
+          if (targetedChunks.length > 0) {
+            const combinedContent = targetedChunks.join('\n\n');
+            const newMeta = extractPoaFieldsFromContent(combinedContent);
+
+            // Обновляем только пустые поля
+            if (doc.fio === 'Не указано' && newMeta.fio !== 'Не указано') {
+              doc.fio = newMeta.fio;
+            }
+            if (doc.poaNumber === 'Не указано' && newMeta.poaNumber !== 'Не указано') {
+              doc.poaNumber = newMeta.poaNumber;
+            }
+            if (doc.issueDate === 'Не указано' && newMeta.issueDate !== 'Не указано') {
+              doc.issueDate = newMeta.issueDate;
+            }
+            if (doc.validUntil === 'Не указано' && newMeta.validUntil !== 'Не указано') {
+              doc.validUntil = newMeta.validUntil;
+            }
+
+            console.log(`Updated metadata for ${doc.fileName}: FIO=${doc.fio}, number=${doc.poaNumber}, issue=${doc.issueDate}, valid=${doc.validUntil}`);
+          }
+        }));
+      }
+    }
 
     console.log(`Enriched ${enrichedDocs.length} POA documents`);
 
