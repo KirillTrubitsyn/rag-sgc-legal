@@ -18,7 +18,7 @@ async function ocrWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-4-vision',  // Grok 4 Vision для точного OCR
+      model: 'grok-4',  // Grok 4 с встроенной поддержкой vision
       messages: [
         {
           role: 'user',
@@ -91,7 +91,7 @@ async function analyzeDocumentWithGrok(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'grok-4-vision',  // Grok 4 Vision для точного OCR
+      model: 'grok-4',  // Grok 4 с встроенной поддержкой vision
       messages: [
         {
           role: 'user',
