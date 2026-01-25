@@ -11,7 +11,7 @@ import { exportToDocx } from '@/lib/docx-generator';
 import { FileUploadResult, PhotoItem, MAX_PHOTOS } from '@/lib/file-types';
 import FilePreview from './FilePreview';
 import PhotoPreview from './PhotoPreview';
-import { FileButton, CameraButton } from './UploadButtons';
+import { FileButton, CameraButton, VoiceButton } from './UploadButtons';
 
 // Компонент модального окна для полноэкранной таблицы
 function FullscreenTableModal({
@@ -462,6 +462,12 @@ export default function ChatInterface() {
     setCapturedPhotos([]);
   };
 
+  // Обработчик голосового ввода
+  const handleVoiceTranscript = useCallback((text: string) => {
+    // Добавляем текст к текущему input
+    setInput(prev => prev ? prev + ' ' + text : text);
+  }, [setInput]);
+
   // Обработчик загрузки файла
   const handleFileProcessed = useCallback((result: FileUploadResult) => {
     if (result.success) {
@@ -877,6 +883,10 @@ export default function ChatInterface() {
                   disabled={isLoading}
                   maxPhotos={MAX_PHOTOS}
                   currentPhotoCount={capturedPhotos.length}
+                />
+                <VoiceButton
+                  onTranscript={handleVoiceTranscript}
+                  disabled={isLoading}
                 />
               </div>
 
