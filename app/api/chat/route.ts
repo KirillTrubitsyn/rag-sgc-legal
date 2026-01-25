@@ -2739,6 +2739,7 @@ export async function POST(req: Request) {
             ...apiMessages,
           ],
           stream: true,
+          temperature: 0, // Предотвращает галлюцинации при анализе загруженных документов
         }),
       });
 
