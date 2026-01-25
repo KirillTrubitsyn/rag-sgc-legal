@@ -1594,50 +1594,130 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
     console.log(`Found ${allDocuments.length} documents from list API`);
 
-    // ШАГ 2: Получаем названия файлов И чанки через ОДИН поисковый запрос
+    // ШАГ 2: Получаем названия файлов И чанки через НЕСКОЛЬКО поисковых запросов
+    // для обеспечения максимального покрытия всех документов
     const fileNamesByFileId = new Map<string, string>();
     const contentChunksByFileId = new Map<string, string[]>();
 
-    const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: 'доверенность уполномочивает представлять интересы сроком до',
-        source: { collection_ids: [collectionId] },
-        retrieval_mode: { type: 'hybrid' },
-        max_num_results: 100,
-        top_k: 100,
-      }),
-    });
+    // Используем несколько разных запросов для лучшего покрытия
+    const searchQueries = [
+      'доверенность уполномочивает представлять интересы',
+      'настоящей доверенностью уполномочиваю',
+      'срок действия доверенности',
+      'подпись доверенность полномочия',
+    ];
 
-    if (searchResponse.ok) {
-      const searchData = await searchResponse.json();
-      const results = searchData.matches || searchData.results || [];
-      console.log(`Search returned ${results.length} results for POA`);
+    for (const query of searchQueries) {
+      try {
+        const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query,
+            source: { collection_ids: [collectionId] },
+            retrieval_mode: { type: 'hybrid' },
+            max_num_results: 100,
+            top_k: 100,
+          }),
+        });
 
-      for (const result of results) {
-        const fileId = result.file_id || '';
-        const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
-        const chunkContent = result.chunk_content || result.content || result.text || '';
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json();
+          const results = searchData.matches || searchData.results || [];
+          console.log(`Search query "${query.substring(0, 30)}..." returned ${results.length} results`);
 
-        if (fileId) {
-          if (fileName && !fileNamesByFileId.has(fileId)) {
-            fileNamesByFileId.set(fileId, fileName);
-          }
-          // Сохраняем чанки для извлечения дат
-          if (chunkContent) {
-            if (!contentChunksByFileId.has(fileId)) {
-              contentChunksByFileId.set(fileId, []);
+          for (const result of results) {
+            const fileId = result.file_id || '';
+            const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
+            const chunkContent = result.chunk_content || result.content || result.text || '';
+
+            if (fileId) {
+              if (fileName && !fileNamesByFileId.has(fileId)) {
+                fileNamesByFileId.set(fileId, fileName);
+              }
+              // Сохраняем чанки для извлечения дат
+              if (chunkContent) {
+                if (!contentChunksByFileId.has(fileId)) {
+                  contentChunksByFileId.set(fileId, []);
+                }
+                // Добавляем чанк только если его еще нет (избегаем дубликатов)
+                const existingChunks = contentChunksByFileId.get(fileId)!;
+                if (!existingChunks.includes(chunkContent)) {
+                  existingChunks.push(chunkContent);
+                }
+              }
             }
-            contentChunksByFileId.get(fileId)!.push(chunkContent);
           }
         }
+      } catch (err) {
+        console.error(`Search query "${query}" failed:`, err);
       }
-      console.log(`Found filenames for ${fileNamesByFileId.size} POA documents`);
-      console.log(`Found content chunks for ${contentChunksByFileId.size} POA documents`);
+    }
+
+    console.log(`After multiple searches: Found filenames for ${fileNamesByFileId.size} POA documents`);
+    console.log(`After multiple searches: Found content chunks for ${contentChunksByFileId.size} POA documents`);
+
+    // ШАГ 2.3: Для документов без контента - делаем индивидуальный поиск по file_id
+    const allFileIds = new Set(allDocuments.map((doc: any) =>
+      doc.file_metadata?.file_id || doc.file_id || doc.id || ''
+    ).filter(Boolean));
+
+    const docsWithoutContent = [...allFileIds].filter(id => !contentChunksByFileId.has(id));
+    console.log(`Documents without content: ${docsWithoutContent.length} of ${allFileIds.size}`);
+
+    if (docsWithoutContent.length > 0 && docsWithoutContent.length <= 20) {
+      // Для небольшого количества документов без контента - делаем индивидуальные запросы
+      console.log(`Fetching content for ${docsWithoutContent.length} documents individually...`);
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < docsWithoutContent.length; i += BATCH_SIZE) {
+        const batch = docsWithoutContent.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (fileId) => {
+          try {
+            // Пробуем найти любой контент для этого файла
+            const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                query: 'доверенность',
+                source: { collection_ids: [collectionId], file_ids: [fileId] },
+                retrieval_mode: { type: 'hybrid' },
+                max_num_results: 5,
+                top_k: 5,
+              }),
+            });
+
+            if (searchResponse.ok) {
+              const searchData = await searchResponse.json();
+              const results = searchData.matches || searchData.results || [];
+              if (results.length > 0) {
+                for (const result of results) {
+                  const chunkContent = result.chunk_content || result.content || result.text || '';
+                  const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
+
+                  if (fileName && !fileNamesByFileId.has(fileId)) {
+                    fileNamesByFileId.set(fileId, fileName);
+                  }
+                  if (chunkContent) {
+                    if (!contentChunksByFileId.has(fileId)) {
+                      contentChunksByFileId.set(fileId, []);
+                    }
+                    contentChunksByFileId.get(fileId)!.push(chunkContent);
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Individual search for file ${fileId} failed:`, err);
+          }
+        }));
+      }
+      console.log(`After individual searches: ${contentChunksByFileId.size} documents have content`);
     }
 
     // ШАГ 2.5: Для документов без имён - получаем через Files API (батчами по 5)
@@ -2655,8 +2735,19 @@ if (isListAll) {
         const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
         console.log('Requested table fields:', fields);
 
+        // Подсчитываем количество документов для явной инструкции
+        const docCount = (documentResults.match(/^\[\d+\]/gm) || []).length;
+        console.log(`POA document count from formatted results: ${docCount}`);
+
         contextSection = documentResults
-          ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто ПОЛНЫЙ список всех документов в базе данных "${collectionName}". Пользователь просит информацию обо ВСЕХ документах - используй весь список для ответа.\n\nИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\nДоступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\nЗапрошенные колонки: ${fields.join(' | ')}\n\nВАЖНО ПРО ССЫЛКИ: Поле "Скачать:" уже содержит ГОТОВУЮ markdown-ссылку [Скачать](URL). КОПИРУЙ её в таблицу ДОСЛОВНО, без изменений!`
+          ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\n` +
+            `КРИТИЧЕСКИ ВАЖНО: В списке выше ровно ${docCount} документов. ` +
+            `Твоя таблица ОБЯЗАНА содержать ровно ${docCount} строк (не считая заголовка)! ` +
+            `Просто преобразуй КАЖДУЮ строку [N] в строку таблицы.\n\n` +
+            `ИНСТРУКЦИЯ ПО КОЛОНКАМ ТАБЛИЦЫ: ${instruction}\n` +
+            `Доступные колонки: № | Файл | ФИО | Номер | Дата выдачи | Действует до | Скачать\n` +
+            `Запрошенные колонки: ${fields.join(' | ')}\n\n` +
+            `ВАЖНО ПРО ССЫЛКИ: Поле "Скачать:" уже содержит ГОТОВУЮ markdown-ссылку [Скачать](URL). КОПИРУЙ её в таблицу ДОСЛОВНО, без изменений!`
           : `\n\nВ базе данных "${collectionName}" нет документов.`;
       } else {
         // Для других коллекций (уставы, формы договоров) - быстрая загрузка только списка
