@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { FileUploadResult, ACCEPTED_FILE_TYPES, MAX_FILE_SIZE, MAX_PHOTOS } from '@/lib/file-types';
-import { Paperclip, Camera, Loader2, X } from 'lucide-react';
+import { Paperclip, Camera, Loader2, X, Mic, Square } from 'lucide-react';
 
 // Функция загрузки файла на сервер
 async function uploadFile(file: File): Promise<FileUploadResult> {
@@ -351,5 +351,104 @@ export function CameraButton({
         </div>
       )}
     </>
+  );
+}
+
+// === VOICE BUTTON ===
+interface VoiceButtonProps {
+  onTranscript: (text: string) => void;
+  disabled?: boolean;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+interface SpeechRecognitionResultList { length: number; [index: number]: SpeechRecognitionResult; }
+interface SpeechRecognitionResult { isFinal: boolean; [index: number]: { transcript: string }; }
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror: ((e: Event) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognition;
+    webkitSpeechRecognition?: new () => SpeechRecognition;
+  }
+}
+
+export function VoiceButton({ onTranscript, disabled }: VoiceButtonProps) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
+  useEffect(() => {
+    const API = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (API) {
+      setSupported(true);
+      const rec = new API();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "ru-RU";
+
+      rec.onresult = (e: SpeechRecognitionEvent) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            onTranscript(e.results[i][0].transcript);
+          }
+        }
+      };
+      rec.onerror = () => setIsRecording(false);
+      rec.onend = () => setIsRecording(false);
+      recognitionRef.current = rec;
+    }
+    return () => { recognitionRef.current?.abort(); };
+  }, [onTranscript]);
+
+  const toggle = () => {
+    if (!recognitionRef.current || disabled) return;
+    if (isRecording) {
+      recognitionRef.current.stop();
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsRecording(true);
+      } catch {
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          recognitionRef.current?.start();
+          setIsRecording(true);
+        }, 100);
+      }
+    }
+  };
+
+  if (!supported) return null;
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={disabled}
+      type="button"
+      className={`p-2 rounded-full transition-colors md:hidden ${
+        isRecording
+          ? "bg-red-500 text-white animate-pulse"
+          : "text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10"
+      } disabled:opacity-50`}
+      title={isRecording ? "Остановить запись" : "Голосовой ввод"}
+    >
+      {isRecording ? (
+        <Square className="w-5 h-5" />
+      ) : (
+        <Mic className="w-5 h-5" />
+      )}
+    </button>
   );
 }
