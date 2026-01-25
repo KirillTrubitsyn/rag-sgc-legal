@@ -125,9 +125,11 @@ async function analyzeDocumentWithGemini(
 }
 
 // Извлечение текста из DOCX через mammoth
-async function extractTextFromDocx(buffer: ArrayBuffer): Promise<string> {
+async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
   try {
-    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+    // mammoth expects a Node.js Buffer, not ArrayBuffer
+    const buffer = Buffer.from(arrayBuffer);
+    const result = await mammoth.extractRawText({ buffer });
     return result.value || '';
   } catch (error) {
     console.error('DOCX extraction error:', error);
