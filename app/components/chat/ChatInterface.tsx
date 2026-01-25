@@ -873,7 +873,7 @@ export default function ChatInterface() {
           <form onSubmit={handleCustomSubmit}>
             {/* Mobile Layout - styled like sgc-legal-ai */}
             <div className="sm:hidden">
-              <div className="bg-sgc-blue-700 border border-sgc-blue-500 rounded-2xl focus-within:border-sgc-orange-500 transition-colors overflow-hidden">
+              <div className="bg-white border border-slate-200 rounded-2xl focus-within:border-sgc-orange-500 transition-colors overflow-hidden shadow-sm">
                 {/* Text input area */}
                 <div className="px-4 pt-3 pb-2">
                   <input
@@ -882,7 +882,7 @@ export default function ChatInterface() {
                     onChange={handleInputChange}
                     placeholder={hasDocuments ? "Задайте вопрос..." : "Спросите что угодно..."}
                     disabled={isLoading}
-                    className="w-full bg-transparent text-white placeholder-gray-400 focus:outline-none disabled:opacity-50 text-base"
+                    className="w-full bg-transparent text-sgc-blue-500 placeholder-gray-400 focus:outline-none disabled:opacity-50 text-base"
                   />
                 </div>
 
@@ -893,19 +893,16 @@ export default function ChatInterface() {
                     <FileButton
                       onFileProcessed={handleFileProcessed}
                       disabled={isLoading}
-                      variant="dark"
                     />
                     <CameraButton
                       onCapture={handlePhotoCapture}
                       disabled={isLoading}
                       maxPhotos={MAX_PHOTOS}
                       currentPhotoCount={capturedPhotos.length}
-                      variant="dark"
                     />
                     <VoiceButton
                       onTranscript={handleVoiceTranscript}
                       disabled={isLoading}
-                      variant="dark"
                     />
                   </div>
 
@@ -913,7 +910,7 @@ export default function ChatInterface() {
                   <button
                     type="submit"
                     disabled={isLoading || isProcessingPhotos || (!input.trim() && !hasDocuments)}
-                    className="p-2 bg-sgc-orange-500 hover:bg-orange-600 disabled:bg-gray-600 rounded-full font-semibold transition-colors disabled:cursor-not-allowed flex items-center justify-center"
+                    className="p-2 bg-sgc-orange-500 hover:bg-orange-600 disabled:bg-gray-300 rounded-full font-semibold transition-colors disabled:cursor-not-allowed flex items-center justify-center"
                   >
                     {isLoading ? (
                       <span className="animate-pulse text-white text-sm px-1">...</span>
