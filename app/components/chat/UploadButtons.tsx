@@ -6,6 +6,13 @@ import { Paperclip, Camera, Loader2, X } from 'lucide-react';
 
 // Функция загрузки файла на сервер
 async function uploadFile(file: File): Promise<FileUploadResult> {
+  console.log('Uploading file:', file.name, 'size:', file.size, 'type:', file.type);
+
+  // Проверка валидности файла
+  if (!file || !file.name || file.size === 0) {
+    throw new Error('Файл пустой или повреждён');
+  }
+
   const formData = new FormData();
   formData.append('file', file);
 
@@ -15,8 +22,14 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
   });
 
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Ошибка загрузки файла');
+    let errorMessage = 'Ошибка загрузки файла';
+    try {
+      const error = await res.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      errorMessage = `Ошибка сервера: ${res.status}`;
+    }
+    throw new Error(errorMessage);
   }
 
   return res.json();
@@ -153,23 +166,93 @@ export function CameraButton({
     setError(null);
   };
 
-  const capture = () => {
-    if (!videoRef.current || !canvasRef.current || !ready) return;
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  const capture = async () => {
+    if (!videoRef.current || !canvasRef.current || !ready || isCapturing) return;
+
+    setIsCapturing(true);
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      setIsCapturing(false);
+      return;
+    }
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
 
-    canvas.toBlob((blob) => {
-      if (blob) {
-        onCapture(new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' }));
-        closeCamera();
+    // Функция для создания файла из dataURL (fallback для iOS)
+    const dataURLtoFile = (dataUrl: string, filename: string): File => {
+      const arr = dataUrl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
       }
-    }, 'image/jpeg', 0.85);
+      return new File([u8arr], filename, { type: mime });
+    };
+
+    const filename = `photo_${Date.now()}.jpg`;
+
+    // Попробуем toBlob с таймаутом, fallback на toDataURL
+    const createFile = (): Promise<File> => {
+      return new Promise((resolve) => {
+        let resolved = false;
+
+        // Таймаут 2 секунды - если toBlob не сработал, используем toDataURL
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            console.log('toBlob timeout, using toDataURL fallback');
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolve(dataURLtoFile(dataUrl, filename));
+          }
+        }, 2000);
+
+        try {
+          canvas.toBlob((blob) => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              if (blob) {
+                console.log('toBlob success, blob size:', blob.size);
+                resolve(new File([blob], filename, { type: 'image/jpeg' }));
+              } else {
+                // toBlob вернул null - используем fallback
+                console.log('toBlob returned null, using toDataURL fallback');
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                resolve(dataURLtoFile(dataUrl, filename));
+              }
+            }
+          }, 'image/jpeg', 0.85);
+        } catch {
+          // Ошибка в toBlob - используем fallback
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            console.log('toBlob error, using toDataURL fallback');
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolve(dataURLtoFile(dataUrl, filename));
+          }
+        }
+      });
+    };
+
+    try {
+      const file = await createFile();
+      onCapture(file);
+      closeCamera();
+    } catch (err) {
+      console.error('Capture error:', err);
+      setError('Не удалось сделать снимок');
+    } finally {
+      setIsCapturing(false);
+    }
   };
 
   const switchCam = () => {
@@ -250,13 +333,17 @@ export function CameraButton({
           >
             <button
               onClick={capture}
-              disabled={!ready}
+              disabled={!ready || isCapturing}
               className={`rounded-full border-4 border-white flex items-center justify-center shadow-lg ${
-                !ready ? 'opacity-50' : 'active:scale-95'
+                !ready || isCapturing ? 'opacity-50' : 'active:scale-95'
               } transition-transform`}
               style={{ width: 72, height: 72 }}
             >
-              <div className="rounded-full bg-white" style={{ width: 56, height: 56 }} />
+              {isCapturing ? (
+                <Loader2 className="w-8 h-8 text-white animate-spin" />
+              ) : (
+                <div className="rounded-full bg-white" style={{ width: 56, height: 56 }} />
+              )}
             </button>
           </div>
 
