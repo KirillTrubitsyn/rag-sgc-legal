@@ -1,6 +1,8 @@
 import { getFileType, getImageMimeType, type FileUploadResult } from '@/lib/file-types';
+import mammoth from 'mammoth';
+import * as XLSX from 'xlsx';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const OCR_PROMPT = `Ты - OCR система. Твоя ЕДИНСТВЕННАЯ задача - ДОСЛОВНО переписать текст с изображения.
@@ -120,6 +122,38 @@ async function analyzeDocumentWithGemini(
 
   console.log('Gemini document analysis text length:', extractedText.length);
   return extractedText;
+}
+
+// Извлечение текста из DOCX через mammoth
+async function extractTextFromDocx(buffer: ArrayBuffer): Promise<string> {
+  try {
+    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+    return result.value || '';
+  } catch (error) {
+    console.error('DOCX extraction error:', error);
+    throw new Error('Не удалось извлечь текст из DOCX файла');
+  }
+}
+
+// Извлечение текста из Excel (XLSX/XLS)
+function extractTextFromExcel(buffer: ArrayBuffer): string {
+  try {
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const textParts: string[] = [];
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      const csvText = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+      if (csvText.trim()) {
+        textParts.push(`--- Лист: ${sheetName} ---\n${csvText}`);
+      }
+    }
+
+    return textParts.join('\n\n') || 'Таблица пуста';
+  } catch (error) {
+    console.error('Excel extraction error:', error);
+    throw new Error('Не удалось извлечь текст из Excel файла');
+  }
 }
 
 // Генерация краткого описания документа
@@ -248,9 +282,21 @@ export async function POST(req: Request) {
       // Текстовые файлы - читаем напрямую
       const decoder = new TextDecoder('utf-8');
       extractedText = decoder.decode(arrayBuffer);
-    } else if (fileType === 'document' || fileType === 'spreadsheet') {
-      // Word/Excel документы - пытаемся анализировать через Gemini
-      extractedText = await analyzeDocumentWithGemini(base64Data, mimeType, filename, googleApiKey);
+    } else if (fileType === 'document') {
+      // Word документы - извлекаем текст через mammoth
+      const ext = filename.toLowerCase().split('.').pop();
+      if (ext === 'docx' || ext === 'doc') {
+        extractedText = await extractTextFromDocx(arrayBuffer);
+        console.log('DOCX text extracted, length:', extractedText.length);
+      } else {
+        // Другие документы - пробуем как текст
+        const decoder = new TextDecoder('utf-8');
+        extractedText = decoder.decode(arrayBuffer);
+      }
+    } else if (fileType === 'spreadsheet') {
+      // Excel таблицы - извлекаем через xlsx
+      extractedText = extractTextFromExcel(arrayBuffer);
+      console.log('Excel text extracted, length:', extractedText.length);
     } else {
       // Неизвестный тип - пытаемся как текст
       try {
