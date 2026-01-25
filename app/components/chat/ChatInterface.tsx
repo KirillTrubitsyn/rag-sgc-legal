@@ -574,6 +574,21 @@ export default function ChatInterface() {
   const hasDocuments = uploadedFiles.length > 0 || capturedPhotos.some(p => p.result);
   const isProcessingPhotos = capturedPhotos.some(p => p.isProcessing);
 
+  // Функция для отображения сообщения пользователя (скрывает технический контекст загруженных документов)
+  const getDisplayContent = (content: string): { text: string; hasDocuments: boolean } => {
+    // Проверяем, содержит ли сообщение загруженные документы
+    if (content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]')) {
+      // Извлекаем вопрос пользователя после маркера
+      const questionMatch = content.match(/ВОПРОС ПОЛЬЗОВАТЕЛЯ:\s*([\s\S]*?)$/);
+      if (questionMatch) {
+        return { text: questionMatch[1].trim(), hasDocuments: true };
+      }
+      // Fallback: если маркер есть, но формат другой
+      return { text: 'Анализ загруженного документа', hasDocuments: true };
+    }
+    return { text: content, hasDocuments: false };
+  };
+
   // Функция для получения вопроса пользователя для данного ответа ассистента
   const getQuestionForAssistant = (messageIndex: number): string => {
     // Ищем последнее сообщение пользователя перед этим ответом
@@ -683,7 +698,20 @@ export default function ChatInterface() {
                   {/* Message Content with Markdown */}
                   <div className="prose prose-sm max-w-none break-words leading-relaxed prose-headings:font-bold prose-headings:text-sgc-blue-500 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0">
                     {message.role === 'user' ? (
-                      <span className="whitespace-pre-wrap text-white">{message.content}</span>
+                      (() => {
+                        const display = getDisplayContent(message.content);
+                        return (
+                          <div>
+                            {display.hasDocuments && (
+                              <div className="flex items-center gap-1.5 mb-2 text-white/80 text-xs">
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Загружен документ для анализа</span>
+                              </div>
+                            )}
+                            <span className="whitespace-pre-wrap text-white">{display.text}</span>
+                          </div>
+                        );
+                      })()
                     ) : (
                       <StructuredResponse content={message.content} onExpandTable={handleExpandTable} />
                     )}
