@@ -1553,7 +1553,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // Увеличен timeout
+
+      console.log(`POA List: Fetching page, cursor: ${cursor || 'start'}`);
 
       const response = await fetch(url.toString(), {
         method: 'GET',
@@ -1567,22 +1569,27 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error('Documents list failed:', response.status);
+        const errorText = await response.text().catch(() => '');
+        console.error('POA Documents list failed:', response.status, errorText.substring(0, 200));
         break;
       }
 
       const data = await response.json();
       const documents = data.data || data.documents || [];
 
+      console.log(`POA List: Got ${documents.length} documents, has_more: ${data.has_more}`);
+
       if (documents.length === 0) break;
 
       allDocuments = allDocuments.concat(documents);
 
-      const hasMore = data.has_more || (documents.length === limit);
+      // Проверяем пагинацию
+      const hasMore = data.has_more === true;
       if (hasMore && documents.length > 0) {
         const lastDoc = documents[documents.length - 1];
         // List API возвращает file_id во вложенной структуре file_metadata
         cursor = lastDoc.file_metadata?.file_id || lastDoc.file_id || lastDoc.id;
+        console.log(`POA List: Next cursor: ${cursor}`);
       } else {
         cursor = null;
       }
@@ -1703,6 +1710,45 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
       return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
     });
+
+    // ШАГ 4: Для документов без дат - загружаем полное содержимое через Files API
+    const docsNeedingDates = enrichedDocs.filter(doc =>
+      doc.issueDate === 'Не указано' || doc.validUntil === 'Не указано'
+    );
+
+    if (docsNeedingDates.length > 0) {
+      console.log(`Loading full content for ${docsNeedingDates.length} docs without dates`);
+      const BATCH_SIZE = 5;
+
+      for (let i = 0; i < docsNeedingDates.length; i += BATCH_SIZE) {
+        const batch = docsNeedingDates.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map(doc => getFullDocumentContent(apiKey, doc.fileId))
+        );
+
+        for (let j = 0; j < batch.length; j++) {
+          const content = results[j];
+          if (content && content.length > 0) {
+            const fullMeta = extractPoaFieldsFromContent(content);
+            const doc = batch[j];
+
+            // Обновляем только недостающие поля
+            if (doc.issueDate === 'Не указано' && fullMeta.issueDate !== 'Не указано') {
+              doc.issueDate = fullMeta.issueDate;
+            }
+            if (doc.validUntil === 'Не указано' && fullMeta.validUntil !== 'Не указано') {
+              doc.validUntil = fullMeta.validUntil;
+            }
+            if (doc.fio === 'Не указано' && fullMeta.fio !== 'Не указано') {
+              doc.fio = fullMeta.fio;
+            }
+            if (doc.poaNumber === 'Не указано' && fullMeta.poaNumber !== 'Не указано') {
+              doc.poaNumber = fullMeta.poaNumber;
+            }
+          }
+        }
+      }
+    }
 
     console.log(`Enriched ${enrichedDocs.length} POA documents`);
 
