@@ -1594,8 +1594,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 
     console.log(`Found ${allDocuments.length} documents from list API`);
 
-    // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
+    // ШАГ 2: Получаем названия файлов И чанки через ОДИН поисковый запрос
     const fileNamesByFileId = new Map<string, string>();
+    const contentChunksByFileId = new Map<string, string[]>();
 
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
       method: 'POST',
@@ -1604,7 +1605,7 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        query: 'доверенность уполномочивает представлять интересы',
+        query: 'доверенность уполномочивает представлять интересы сроком до',
         source: { collection_ids: [collectionId] },
         retrieval_mode: { type: 'hybrid' },
         max_num_results: 100,
@@ -1620,11 +1621,23 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       for (const result of results) {
         const fileId = result.file_id || '';
         const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
-        if (fileId && fileName && !fileNamesByFileId.has(fileId)) {
-          fileNamesByFileId.set(fileId, fileName);
+        const chunkContent = result.chunk_content || result.content || result.text || '';
+
+        if (fileId) {
+          if (fileName && !fileNamesByFileId.has(fileId)) {
+            fileNamesByFileId.set(fileId, fileName);
+          }
+          // Сохраняем чанки для извлечения дат
+          if (chunkContent) {
+            if (!contentChunksByFileId.has(fileId)) {
+              contentChunksByFileId.set(fileId, []);
+            }
+            contentChunksByFileId.get(fileId)!.push(chunkContent);
+          }
         }
       }
       console.log(`Found filenames for ${fileNamesByFileId.size} POA documents`);
+      console.log(`Found content chunks for ${contentChunksByFileId.size} POA documents`);
     }
 
     // ШАГ 2.5: Для документов без имён - получаем через Files API (батчами по 5)
@@ -1658,7 +1671,7 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       console.log(`After Files API: ${fileNamesByFileId.size} POA docs have names`);
     }
 
-    // ШАГ 3: Обогащаем документы названиями
+    // ШАГ 3: Обогащаем документы названиями и метаданными из содержимого
     const enrichedDocs = allDocuments.map((doc: any, index: number) => {
       // List API возвращает данные во вложенной структуре file_metadata
       const fileId = doc.file_metadata?.file_id || doc.file_id || doc.id || '';
@@ -1672,7 +1685,21 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       }
 
       // Извлекаем метаданные из названия файла
-      const { fio, poaNumber, issueDate, validUntil } = extractPoaFieldsFromFilename(fileName);
+      const filenameMeta = extractPoaFieldsFromFilename(fileName);
+
+      // Извлекаем метаданные из содержимого документа (чанков)
+      const chunks = contentChunksByFileId.get(fileId);
+      let contentMeta = { fio: 'Не указано', poaNumber: 'Не указано', issueDate: 'Не указано', validUntil: 'Не указано' };
+      if (chunks && chunks.length > 0) {
+        const combinedContent = chunks.join('\n\n');
+        contentMeta = extractPoaFieldsFromContent(combinedContent);
+      }
+
+      // Объединяем метаданные: контент имеет приоритет над названием файла
+      const fio = contentMeta.fio !== 'Не указано' ? contentMeta.fio : filenameMeta.fio;
+      const poaNumber = contentMeta.poaNumber !== 'Не указано' ? contentMeta.poaNumber : filenameMeta.poaNumber;
+      const issueDate = contentMeta.issueDate !== 'Не указано' ? contentMeta.issueDate : filenameMeta.issueDate;
+      const validUntil = contentMeta.validUntil !== 'Не указано' ? contentMeta.validUntil : filenameMeta.validUntil;
 
       return { fileId, fileName: fileName || 'Документ', fio, poaNumber, issueDate, validUntil };
     });
