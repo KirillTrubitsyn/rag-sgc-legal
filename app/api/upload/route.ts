@@ -17,16 +17,16 @@ const OCR_PROMPT = `Ты - OCR система. Твоя ЕДИНСТВЕННАЯ
 
 Начни транскрипцию:`;
 
-// OCR через Gemini 3.0 Flash (Google) - лучшая точность для документов
+// OCR через Gemini 3 Flash Preview (Google) - лучшая точность для документов
 async function ocrWithGemini(
   base64Image: string,
   mimeType: string,
   apiKey: string
 ): Promise<string> {
-  console.log('OCR with Gemini 3.0 Flash, mime:', mimeType);
+  console.log('OCR with Gemini 3 Flash Preview, mime:', mimeType);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: {
@@ -79,7 +79,7 @@ async function analyzeDocumentWithGemini(
   console.log('Analyzing document with Gemini:', filename, mimeType);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: {
@@ -214,11 +214,11 @@ export async function POST(req: Request) {
 
     // Обработка в зависимости от типа файла
     if (fileType === 'image') {
-      // Изображения - OCR через Gemini 3.0 Flash
+      // Изображения - OCR через Gemini 3 Flash Preview
       mimeType = getImageMimeType(filename);
       extractedText = await ocrWithGemini(base64Data, mimeType, googleApiKey);
     } else if (fileType === 'pdf') {
-      // PDF - анализ через Gemini 3.0 Flash
+      // PDF - анализ через Gemini 3 Flash Preview
       mimeType = 'application/pdf';
       extractedText = await analyzeDocumentWithGemini(base64Data, mimeType, filename, googleApiKey);
     } else if (fileType === 'text') {
