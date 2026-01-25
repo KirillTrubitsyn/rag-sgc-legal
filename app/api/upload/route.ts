@@ -3,35 +3,7 @@ import { getFileType, getImageMimeType, type FileUploadResult } from '@/lib/file
 export const runtime = 'edge';
 export const maxDuration = 120;
 
-// OCR через Grok 4 Vision для точного распознавания текста
-async function ocrWithGrok(
-  base64Image: string,
-  mimeType: string,
-  apiKey: string
-): Promise<string> {
-  console.log('OCR with Grok Vision, mime:', mimeType);
-
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'grok-2-vision-1212',  // Стабильная vision-модель для OCR
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${mimeType};base64,${base64Image}`,
-              },
-            },
-            {
-              type: 'text',
-              text: `Ты - OCR система. Твоя ЕДИНСТВЕННАЯ задача - ДОСЛОВНО переписать текст с изображения.
+const OCR_PROMPT = `Ты - OCR система. Твоя ЕДИНСТВЕННАЯ задача - ДОСЛОВНО переписать текст с изображения.
 
 СТРОГИЕ ПРАВИЛА:
 1. Пиши ТОЛЬКО тот текст, который РЕАЛЬНО ВИДИШЬ на изображении
@@ -43,96 +15,110 @@ async function ocrWithGrok(
 
 ФОРМАТ: Сохраняй структуру документа (абзацы, отступы). Не добавляй комментарии.
 
-Начни транскрипцию:`,
-            },
-          ],
+Начни транскрипцию:`;
+
+// OCR через Gemini 3.0 Flash (Google) - лучшая точность для документов
+async function ocrWithGemini(
+  base64Image: string,
+  mimeType: string,
+  apiKey: string
+): Promise<string> {
+  console.log('OCR with Gemini 3.0 Flash, mime:', mimeType);
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Image,
+                },
+              },
+              {
+                text: OCR_PROMPT,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 8192,
         },
-      ],
-      max_tokens: 8192,
-      temperature: 0,
-    }),
-  });
+      }),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Grok Vision OCR failed:', response.status, errorText);
-    throw new Error(`OCR failed: ${response.status}`);
+    console.error('Gemini OCR failed:', response.status, errorText);
+    throw new Error(`OCR failed: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
-  const extractedText = data.choices?.[0]?.message?.content || '';
+  const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-  console.log('OCR extracted text length:', extractedText.length);
+  console.log('Gemini OCR extracted text length:', extractedText.length);
   return extractedText;
 }
 
-// Извлечение текста из PDF (через конвертацию в изображения на стороне клиента)
-// В Edge runtime нет возможности работать с PDF напрямую,
-// поэтому мы ожидаем, что PDF будет загружен как изображения страниц
-// или отправлен целиком для анализа через vision
-
-// Анализ документа через Grok (для PDF и сканов)
-async function analyzeDocumentWithGrok(
+// Анализ документа через Gemini (для PDF и сканов)
+async function analyzeDocumentWithGemini(
   base64Data: string,
   mimeType: string,
   filename: string,
   apiKey: string
 ): Promise<string> {
-  console.log('Analyzing document with Grok:', filename, mimeType);
+  console.log('Analyzing document with Gemini:', filename, mimeType);
 
-  // Для PDF используем vision модель с base64 данными
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'grok-2-vision-1212',  // Стабильная vision-модель для OCR
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${mimeType};base64,${base64Data}`,
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Data,
+                },
               },
-            },
-            {
-              type: 'text',
-              text: `Ты - OCR система. Твоя ЕДИНСТВЕННАЯ задача - ДОСЛОВНО переписать текст с изображения документа "${filename}".
-
-СТРОГИЕ ПРАВИЛА:
-1. Пиши ТОЛЬКО тот текст, который РЕАЛЬНО ВИДИШЬ на изображении
-2. ЗАПРЕЩЕНО придумывать, дополнять или интерпретировать
-3. Если буква/цифра нечёткая - пиши [?]
-4. Если слово неразборчиво - пиши [неразборчиво]
-5. НИКАКИХ выдуманных названий организаций, ФИО, номеров, дат, реквизитов
-6. Если не можешь прочитать текст - напиши "Не удалось распознать текст на изображении"
-
-ФОРМАТ: Сохраняй структуру документа (абзацы, таблицы). Не добавляй комментарии.
-
-Начни транскрипцию:`,
-            },
-          ],
+              {
+                text: `Документ: ${filename}\n\n${OCR_PROMPT}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 8192,
         },
-      ],
-      max_tokens: 8192,
-      temperature: 0,
-    }),
-  });
+      }),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Grok document analysis failed:', response.status, errorText);
+    console.error('Gemini document analysis failed:', response.status, errorText);
     throw new Error(`Document analysis failed: ${response.status}`);
   }
 
   const data = await response.json();
-  const extractedText = data.choices?.[0]?.message?.content || '';
+  const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-  console.log('Document analysis text length:', extractedText.length);
+  console.log('Gemini document analysis text length:', extractedText.length);
   return extractedText;
 }
 
@@ -188,10 +174,12 @@ export async function POST(req: Request) {
   console.log('=== Upload API called ===');
 
   try {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) {
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    const xaiApiKey = process.env.XAI_API_KEY;
+
+    if (!googleApiKey) {
       return new Response(
-        JSON.stringify({ success: false, error: 'API key not configured' }),
+        JSON.stringify({ success: false, error: 'GOOGLE_API_KEY not configured for OCR' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -226,21 +214,20 @@ export async function POST(req: Request) {
 
     // Обработка в зависимости от типа файла
     if (fileType === 'image') {
-      // Изображения - OCR через Grok Vision
+      // Изображения - OCR через Gemini 3.0 Flash
       mimeType = getImageMimeType(filename);
-      extractedText = await ocrWithGrok(base64Data, mimeType, apiKey);
+      extractedText = await ocrWithGemini(base64Data, mimeType, googleApiKey);
     } else if (fileType === 'pdf') {
-      // PDF - анализ через Grok Vision
+      // PDF - анализ через Gemini 3.0 Flash
       mimeType = 'application/pdf';
-      extractedText = await analyzeDocumentWithGrok(base64Data, mimeType, filename, apiKey);
+      extractedText = await analyzeDocumentWithGemini(base64Data, mimeType, filename, googleApiKey);
     } else if (fileType === 'text') {
       // Текстовые файлы - читаем напрямую
       const decoder = new TextDecoder('utf-8');
       extractedText = decoder.decode(arrayBuffer);
     } else if (fileType === 'document' || fileType === 'spreadsheet') {
-      // Word/Excel документы - пытаемся анализировать через vision
-      // (для полноценной работы нужна библиотека извлечения текста)
-      extractedText = await analyzeDocumentWithGrok(base64Data, mimeType, filename, apiKey);
+      // Word/Excel документы - пытаемся анализировать через Gemini
+      extractedText = await analyzeDocumentWithGemini(base64Data, mimeType, filename, googleApiKey);
     } else {
       // Неизвестный тип - пытаемся как текст
       try {
@@ -251,8 +238,10 @@ export async function POST(req: Request) {
       }
     }
 
-    // Генерируем краткое описание
-    const summary = await generateSummary(extractedText, filename, apiKey);
+    // Генерируем краткое описание (используем Grok если есть ключ, иначе простое описание)
+    const summary = xaiApiKey
+      ? await generateSummary(extractedText, filename, xaiApiKey)
+      : `Загружен документ: ${filename}`;
 
     const result: FileUploadResult = {
       success: true,
