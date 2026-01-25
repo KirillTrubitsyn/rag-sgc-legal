@@ -839,8 +839,8 @@ export default function ChatInterface() {
         </div>
       </div>
 
-      {/* Input Form */}
-      <div className="bg-white border-t border-slate-200 px-4 py-4 sm:px-6 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+      {/* Input Form - Mobile: dark theme, Desktop: light theme */}
+      <div className="bg-gradient-to-b from-[#0a1929] to-[#152840] sm:bg-white sm:bg-none border-t border-slate-700 sm:border-slate-200 px-4 py-4 sm:px-6 shadow-[0_-4px_20px_rgba(0,0,0,0.3)] sm:shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
         <div className="max-w-4xl mx-auto">
           {/* Превью загруженных файлов */}
           {uploadedFiles.length > 0 && (
@@ -864,14 +864,74 @@ export default function ChatInterface() {
 
           {/* Индикатор наличия документов */}
           {hasDocuments && (
-            <div className="mb-2 text-xs text-sgc-orange-500 flex items-center gap-1">
+            <div className="mb-2 text-xs text-sgc-orange-400 sm:text-sgc-orange-500 flex items-center gap-1">
               <FileText className="w-3 h-3" />
               <span>Документы будут использованы для ответа на ваш вопрос</span>
             </div>
           )}
 
           <form onSubmit={handleCustomSubmit}>
-            <div className="flex gap-2 sm:gap-3 items-center">
+            {/* Mobile Layout */}
+            <div className="sm:hidden">
+              {/* Поле ввода с кнопкой отправки */}
+              <div className="flex items-center gap-3 mb-3">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={handleInputChange}
+                  placeholder={hasDocuments ? "Задайте вопрос..." : "Спросите что угодно..."}
+                  disabled={isLoading}
+                  className={cn(
+                    'flex-1 rounded-2xl border-0 px-4 py-3.5',
+                    'bg-[#1e3a5f]/80 backdrop-blur-sm',
+                    'focus:outline-none focus:ring-2 focus:ring-sgc-orange-500/50',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                    'text-white placeholder-slate-400',
+                    'transition-all duration-200'
+                  )}
+                />
+                <button
+                  type="submit"
+                  disabled={isLoading || isProcessingPhotos || (!input.trim() && !hasDocuments)}
+                  className={cn(
+                    'inline-flex items-center justify-center',
+                    'w-12 h-12 rounded-full',
+                    'bg-gradient-to-r from-sgc-orange-500 to-sgc-orange-600',
+                    'text-white font-medium',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                    'focus:outline-none focus:ring-2 focus:ring-sgc-orange-500 focus:ring-offset-2 focus:ring-offset-[#152840]',
+                    'shadow-lg shadow-sgc-orange-500/30',
+                    'transition-all duration-200 hover:scale-105 active:scale-95'
+                  )}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Кнопки загрузки - под полем ввода */}
+              <div className="flex items-center gap-4 pl-1">
+                <FileButton
+                  onFileProcessed={handleFileProcessed}
+                  disabled={isLoading}
+                  variant="dark"
+                />
+                <CameraButton
+                  onCapture={handlePhotoCapture}
+                  disabled={isLoading}
+                  maxPhotos={MAX_PHOTOS}
+                  currentPhotoCount={capturedPhotos.length}
+                  variant="dark"
+                />
+                <VoiceButton
+                  onTranscript={handleVoiceTranscript}
+                  disabled={isLoading}
+                  variant="dark"
+                />
+              </div>
+            </div>
+
+            {/* Desktop Layout */}
+            <div className="hidden sm:flex gap-3 items-center">
               {/* Кнопки загрузки */}
               <div className="flex items-center gap-1">
                 <FileButton
@@ -920,7 +980,7 @@ export default function ChatInterface() {
             </div>
           </form>
         </div>
-        <p className="text-center text-xs text-sgc-blue-500/40 mt-2">
+        <p className="text-center text-xs text-slate-500 sm:text-sgc-blue-500/40 mt-3 sm:mt-2">
           Разработка @Кирилл Трубицын
         </p>
       </div>

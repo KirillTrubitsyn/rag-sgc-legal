@@ -114,9 +114,10 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
 interface FileButtonProps {
   onFileProcessed: (result: FileUploadResult) => void;
   disabled?: boolean;
+  variant?: 'light' | 'dark';
 }
 
-export function FileButton({ onFileProcessed, disabled }: FileButtonProps) {
+export function FileButton({ onFileProcessed, disabled, variant = 'light' }: FileButtonProps) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -146,6 +147,10 @@ export function FileButton({ onFileProcessed, disabled }: FileButtonProps) {
     }
   };
 
+  const buttonStyles = variant === 'dark'
+    ? 'p-2.5 rounded-full text-slate-400 hover:text-sgc-orange-400 hover:bg-white/10 transition-colors disabled:opacity-50'
+    : 'p-2 rounded-full text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10 transition-colors disabled:opacity-50';
+
   return (
     <>
       <input
@@ -160,7 +165,7 @@ export function FileButton({ onFileProcessed, disabled }: FileButtonProps) {
         onClick={() => fileInputRef.current?.click()}
         disabled={disabled || isUploading}
         type="button"
-        className="p-2 rounded-full text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10 transition-colors disabled:opacity-50"
+        className={buttonStyles}
         title="Загрузить документ"
       >
         {isUploading ? (
@@ -179,13 +184,15 @@ interface CameraButtonProps {
   disabled?: boolean;
   maxPhotos?: number;
   currentPhotoCount?: number;
+  variant?: 'light' | 'dark';
 }
 
 export function CameraButton({
   onCapture,
   disabled,
   maxPhotos = MAX_PHOTOS,
-  currentPhotoCount = 0
+  currentPhotoCount = 0,
+  variant = 'light'
 }: CameraButtonProps) {
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -342,13 +349,17 @@ export function CameraButton({
     setTimeout(() => startCamera(), 100);
   };
 
+  const buttonStyles = variant === 'dark'
+    ? 'p-2.5 rounded-full text-slate-400 hover:text-sgc-orange-400 hover:bg-white/10 transition-colors disabled:opacity-50 relative'
+    : 'p-2 rounded-full text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10 transition-colors disabled:opacity-50 relative md:hidden';
+
   return (
     <>
       <button
         onClick={openCamera}
         disabled={disabled || isLimitReached}
         type="button"
-        className="p-2 rounded-full text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10 transition-colors disabled:opacity-50 relative md:hidden"
+        className={buttonStyles}
         title="Сфотографировать документ"
       >
         <Camera className="w-5 h-5" />
@@ -439,6 +450,7 @@ export function CameraButton({
 interface VoiceButtonProps {
   onTranscript: (text: string) => void;
   disabled?: boolean;
+  variant?: 'light' | 'dark';
 }
 
 interface SpeechRecognitionEvent extends Event {
@@ -465,7 +477,7 @@ declare global {
   }
 }
 
-export function VoiceButton({ onTranscript, disabled }: VoiceButtonProps) {
+export function VoiceButton({ onTranscript, disabled, variant = 'light' }: VoiceButtonProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [supported, setSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -513,16 +525,20 @@ export function VoiceButton({ onTranscript, disabled }: VoiceButtonProps) {
 
   if (!supported) return null;
 
+  const baseStyles = variant === 'dark'
+    ? isRecording
+      ? "p-2.5 rounded-full bg-red-500 text-white animate-pulse transition-colors disabled:opacity-50"
+      : "p-2.5 rounded-full text-slate-400 hover:text-sgc-orange-400 hover:bg-white/10 transition-colors disabled:opacity-50"
+    : isRecording
+      ? "p-2 rounded-full bg-red-500 text-white animate-pulse transition-colors md:hidden disabled:opacity-50"
+      : "p-2 rounded-full text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10 transition-colors md:hidden disabled:opacity-50";
+
   return (
     <button
       onClick={toggle}
       disabled={disabled}
       type="button"
-      className={`p-2 rounded-full transition-colors md:hidden ${
-        isRecording
-          ? "bg-red-500 text-white animate-pulse"
-          : "text-sgc-blue-400 hover:text-sgc-orange-500 hover:bg-sgc-orange-500/10"
-      } disabled:opacity-50`}
+      className={baseStyles}
       title={isRecording ? "Остановить запись" : "Голосовой ввод"}
     >
       {isRecording ? (

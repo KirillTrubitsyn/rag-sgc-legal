@@ -25,24 +25,23 @@ interface QueryAnalysis {
 
 // Проверка, содержит ли сообщение загруженные документы
 function hasUploadedDocuments(messages: any[]): boolean {
-  const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-  if (!lastUserMessage) {
-    console.log('hasUploadedDocuments: no user message found');
-    return false;
+  // Проверяем ВСЮ историю сообщений на наличие загруженных документов
+  // Это позволяет задавать follow-up вопросы по ранее загруженному документу
+  const userMessages = messages.filter((m: any) => m.role === 'user');
+
+  for (const message of userMessages) {
+    const content = typeof message.content === 'string'
+      ? message.content
+      : JSON.stringify(message.content);
+
+    if (content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]')) {
+      console.log('hasUploadedDocuments: found document in message history');
+      return true;
+    }
   }
 
-  const content = typeof lastUserMessage.content === 'string'
-    ? lastUserMessage.content
-    : JSON.stringify(lastUserMessage.content);
-
-  const hasMarker = content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
-  console.log('hasUploadedDocuments:', {
-    hasMarker,
-    contentLength: content.length,
-    contentPreview: content.substring(0, 200) + (content.length > 200 ? '...' : '')
-  });
-
-  return hasMarker;
+  console.log('hasUploadedDocuments: no uploaded documents in history');
+  return false;
 }
 
 // Анализ запроса пользователя и определение коллекции с помощью LLM
@@ -2675,8 +2674,13 @@ export async function POST(req: Request) {
       console.log('Using uploaded document mode with knowledge base search');
 
       // Извлекаем текст загруженного документа для поиска
-      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-      const uploadedContent = lastUserMessage?.content || '';
+      // Ищем сообщение с маркером документа (может быть не последним при follow-up вопросах)
+      const userMessages = messages.filter((m: any) => m.role === 'user');
+      const documentMessage = userMessages.find((m: any) => {
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        return content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]');
+      });
+      const uploadedContent = documentMessage?.content || '';
 
       // Извлекаем ключевые данные для поиска по базе знаний
       let knowledgeBaseContext = '';
@@ -2716,7 +2720,7 @@ export async function POST(req: Request) {
 
       // Для загруженных документов используем специальный промпт
       const systemPromptWithContext = uploadedDocumentSystemPrompt +
-        '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в сообщении пользователя.' +
+        '\n\nАнализируй документы из раздела [ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА] в истории диалога. Документ может быть в любом из предыдущих сообщений пользователя - используй его для ответа на все вопросы в этом диалоге.' +
         (knowledgeBaseContext ? `\n\nЕсли пользователь спрашивает, есть ли документ в базе — сравни загруженный документ с результатами поиска ниже. Если номер доверенности или ФИО совпадают — документ ЕСТЬ в базе.${knowledgeBaseContext}` : '');
 
       const apiMessages = messages.map((m: any) => ({
