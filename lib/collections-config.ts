@@ -39,9 +39,9 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Доверенности',
     description: 'Доверенности и полномочия сотрудников группы СГК',
     priority: 10, // Высокий приоритет - проверяется первым
-    useFullContent: false, // Сканы PDF без OCR - используем чанки из поиска
+    useFullContent: true, // Загружаем ПОЛНЫЙ текст документов, чтобы ничего не потерялось в чанках
     useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
-    maxTokensPerDoc: 3000, // Примерный размер доверенности в токенах
+    maxTokensPerDoc: 5000, // Примерный размер доверенности в токенах (увеличен для полного текста)
     keywords: [
       // Основные термины
       'доверенност', 'полномочи', 'уполномоч', 'представител',
