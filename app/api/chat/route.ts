@@ -17,21 +17,21 @@ export const maxDuration = 120;
 // ============================================
 
 // Выполняет промисы батчами для предотвращения rate limiting
-async function executeBatched<T, R>(
-  items: T[],
+async function executeBatchedSearch(
+  queries: string[],
   batchSize: number,
-  processor: (item: T) => Promise<R>,
+  processor: (query: string) => Promise<{ query: string; results: any[] }>,
   delayBetweenBatches: number = 100
-): Promise<R[]> {
-  const results: R[] = [];
+): Promise<{ query: string; results: any[] }[]> {
+  const results: { query: string; results: any[] }[] = [];
 
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
+  for (let i = 0; i < queries.length; i += batchSize) {
+    const batch = queries.slice(i, i + batchSize);
     const batchResults = await Promise.all(batch.map(processor));
     results.push(...batchResults);
 
     // Добавляем небольшую задержку между батчами для предотвращения rate limiting
-    if (i + batchSize < items.length) {
+    if (i + batchSize < queries.length && delayBetweenBatches > 0) {
       await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
     }
   }
@@ -1857,7 +1857,7 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
     ];
 
     // Выполняем запросы батчами по 2 для предотвращения rate limiting
-    const searchResults = await executeBatched(
+    const searchResults = await executeBatchedSearch(
       searchQueries,
       2, // batch size
       async (query: string) => {
@@ -2313,7 +2313,7 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     const fileNamesByFileId = new Map<string, string>();
 
     // Выполняем запросы батчами по 5 для предотвращения rate limiting
-    const allSearchResults = await executeBatched(
+    const allSearchResults = await executeBatchedSearch(
       searchQueries,
       5, // batch size
       async (query: string) => {
