@@ -12,6 +12,167 @@ import { classifyQueryWithLLM, type ClassificationResult } from '@/lib/query-cla
 export const runtime = 'edge';
 export const maxDuration = 60;
 
+// ============================================
+// ОРГАНИЗАЦИИ ГРУППЫ СГК И ИХ ВАРИАЦИИ НАЗВАНИЙ
+// ============================================
+
+interface OrganizationInfo {
+  id: string;           // Уникальный идентификатор
+  canonicalName: string; // Полное официальное название
+  shortNames: string[]; // Сокращенные названия и вариации для поиска
+  filePatterns: string[]; // Паттерны в именах файлов
+}
+
+// Список организаций группы СГК
+const SGK_ORGANIZATIONS: OrganizationInfo[] = [
+  {
+    id: 'kuzbassenergo',
+    canonicalName: 'АО "Кузбассэнерго"',
+    shortNames: ['кузбассэнерго', 'кузбасс энерго', 'kuzbassenergo', 'кузбасс-энерго'],
+    filePatterns: ['кузбассэнерго', 'kuzbassenergo'],
+  },
+  {
+    id: 'sgk',
+    canonicalName: 'АО "СГК"',
+    shortNames: ['сгк', 'сибирская генерирующая', 'sgk'],
+    filePatterns: ['сгк', 'sgk'],
+  },
+  {
+    id: 'eniseyskaya-tgk',
+    canonicalName: 'АО "Енисейская ТГК (ТГК-13)"',
+    shortNames: ['енисейская тгк', 'тгк-13', 'тгк 13', 'енисейская', 'eniseyskaya'],
+    filePatterns: ['енисейская', 'тгк-13', 'тгк13', 'eniseyskaya'],
+  },
+  {
+    id: 'abakanskaya-tec',
+    canonicalName: 'АО "Абаканская ТЭЦ"',
+    shortNames: ['абаканская тэц', 'абаканская', 'abakanskaya'],
+    filePatterns: ['абаканская', 'abakanskaya', 'абаканск'],
+  },
+  {
+    id: 'novo-kemerovskaya-tec',
+    canonicalName: 'АО "Ново-Кемеровская ТЭЦ"',
+    shortNames: ['ново-кемеровская тэц', 'ново-кемеровская', 'новокемеровская', 'novo-kemerovskaya', 'новокем'],
+    filePatterns: ['ново-кемеровская', 'новокемеровская', 'novo-kemerovskaya', 'ново_кемеровская'],
+  },
+  {
+    id: 'delta-technology',
+    canonicalName: 'АО "Дельта технолоджи"',
+    shortNames: ['дельта технолоджи', 'дельта', 'delta technology', 'delta'],
+    filePatterns: ['дельта', 'delta'],
+  },
+  {
+    id: 'krasnoyarskaya-tec-1',
+    canonicalName: 'АО "Красноярская ТЭЦ-1"',
+    shortNames: ['красноярская тэц-1', 'красноярская тэц 1', 'ктэц-1'],
+    filePatterns: ['красноярская_тэц-1', 'красноярская тэц-1', 'ктэц-1'],
+  },
+  {
+    id: 'krasnoyarskaya-tec-2',
+    canonicalName: 'АО "Красноярская ТЭЦ-2"',
+    shortNames: ['красноярская тэц-2', 'красноярская тэц 2', 'ктэц-2'],
+    filePatterns: ['красноярская_тэц-2', 'красноярская тэц-2', 'ктэц-2'],
+  },
+  {
+    id: 'krasnoyarskaya-tec-3',
+    canonicalName: 'АО "Красноярская ТЭЦ-3"',
+    shortNames: ['красноярская тэц-3', 'красноярская тэц 3', 'ктэц-3'],
+    filePatterns: ['красноярская_тэц-3', 'красноярская тэц-3', 'ктэц-3'],
+  },
+];
+
+/**
+ * Извлекает название организации из текста запроса пользователя
+ * @param text - текст для анализа
+ * @returns информация об организации или null если не найдена
+ */
+function extractOrganizationFromText(text: string): OrganizationInfo | null {
+  const lowerText = text.toLowerCase();
+
+  for (const org of SGK_ORGANIZATIONS) {
+    for (const name of org.shortNames) {
+      if (lowerText.includes(name)) {
+        console.log(`Extracted organization: ${org.canonicalName} (matched: "${name}")`);
+        return org;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Извлекает название организации из истории сообщений
+ * Ищет в обратном порядке (от последних к первым) для получения актуального контекста
+ * @param messages - массив сообщений
+ * @returns информация об организации или null если не найдена
+ */
+function extractOrganizationFromMessages(messages: any[]): OrganizationInfo | null {
+  // Сначала проверяем последние сообщения (более актуальный контекст)
+  const userMessages = messages
+    .filter((m: any) => m.role === 'user')
+    .reverse();
+
+  for (const message of userMessages) {
+    const content = typeof message.content === 'string'
+      ? message.content
+      : JSON.stringify(message.content);
+
+    const org = extractOrganizationFromText(content);
+    if (org) {
+      return org;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Проверяет, соответствует ли имя файла указанной организации
+ * @param fileName - имя файла документа
+ * @param org - информация об организации
+ * @returns true если файл относится к данной организации
+ */
+function fileMatchesOrganization(fileName: string, org: OrganizationInfo): boolean {
+  const lowerFileName = fileName.toLowerCase();
+
+  for (const pattern of org.filePatterns) {
+    if (lowerFileName.includes(pattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Фильтрует результаты поиска по организации
+ * Если организация указана - оставляет только документы этой организации
+ * Если организация не указана - возвращает все документы
+ * Использует generic тип для сохранения типа массива
+ */
+function filterResultsByOrganization<T extends { fileName: string }>(
+  results: T[],
+  org: OrganizationInfo | null
+): T[] {
+  if (!org) {
+    return results; // Нет фильтра - возвращаем всё
+  }
+
+  const filtered = results.filter(doc => fileMatchesOrganization(doc.fileName, org));
+
+  console.log(`Organization filter: ${org.canonicalName}`);
+  console.log(`Results before filter: ${results.length}, after: ${filtered.length}`);
+
+  // Если после фильтрации нет результатов, логируем имена файлов для отладки
+  if (filtered.length === 0 && results.length > 0) {
+    console.log('No matching documents found. Available files:',
+      results.map(r => r.fileName).join(', '));
+  }
+
+  return filtered;
+}
+
 // Результат определения запроса
 interface QueryAnalysis {
   collectionKey: string | null;      // Ключ коллекции (poa, standardsAndRegulations, contractForms, etc.) или null если не определена
@@ -236,11 +397,21 @@ async function getAllChunksForDocument(
 
 // Функция поиска по коллекции через правильный endpoint
 // С загрузкой ВСЕХ чанков найденных документов для полного контекста
-async function searchCollection(query: string, apiKey: string, collectionId: string, maxResults: number = 15): Promise<string> {
+// organizationFilter - опциональный фильтр по организации (для уставов)
+async function searchCollection(
+  query: string,
+  apiKey: string,
+  collectionId: string,
+  maxResults: number = 15,
+  organizationFilter: OrganizationInfo | null = null
+): Promise<string> {
   console.log('=== Collection Search ===');
   console.log('Query:', query);
   console.log('Collection ID:', collectionId);
   console.log('Max results:', maxResults);
+  if (organizationFilter) {
+    console.log('Organization filter:', organizationFilter.canonicalName);
+  }
 
   try {
     // ШАГ 1: Первоначальный поиск по запросу
@@ -309,7 +480,7 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
     console.log(`Found ${uniqueFiles.size} unique documents`);
 
     // ШАГ 3: Используем чанки из результатов поиска (без дополнительных запросов для скорости)
-    const enrichedDocuments = Array.from(uniqueFiles.entries()).map(([fileId, meta]) => {
+    let enrichedDocuments = Array.from(uniqueFiles.entries()).map(([fileId, meta]) => {
       return {
         fileId,
         fileName: meta.fileName,
@@ -318,6 +489,27 @@ async function searchCollection(query: string, apiKey: string, collectionId: str
         fullContent: meta.initialChunks.join('\n\n')
       };
     });
+
+    // ШАГ 3.5: Фильтруем документы по организации (если указан фильтр)
+    // Это критически важно для коллекции уставов, чтобы не путать уставы разных организаций
+    if (organizationFilter) {
+      const beforeFilter = enrichedDocuments.length;
+      enrichedDocuments = filterResultsByOrganization(enrichedDocuments, organizationFilter);
+      console.log(`Organization filter applied: ${beforeFilter} -> ${enrichedDocuments.length} documents`);
+
+      // Если после фильтрации не осталось документов - возвращаем сообщение об отсутствии устава
+      if (enrichedDocuments.length === 0) {
+        const availableOrgs = Array.from(uniqueFiles.entries())
+          .map(([, meta]) => meta.fileName)
+          .join(', ');
+
+        return `В базе найден устав следующей организации: ${availableOrgs.split(',')[0]?.trim() || 'неизвестно'}.\n\nУстав ${organizationFilter.canonicalName} не найден.\n\nСсылки на документы\n\n| № | НАЗВАНИЕ ДОКУМЕНТА | ССЫЛКА НА СКАЧИВАНИЕ |\n|---|-------------------|----------------------|\n${Array.from(uniqueFiles.entries()).map(([fileId, meta], i) => {
+          const encodedFilename = encodeURIComponent(meta.fileName);
+          const downloadUrl = `/api/download?file_id=${fileId}&filename=${encodedFilename}`;
+          return `| ${i + 1} | ${meta.fileName} | [Скачать](${downloadUrl}) |`;
+        }).join('\n')}\n\n**ВАЖНО:** Для получения информации по ${organizationFilter.canonicalName} уточните наличие устава в базе или предоставьте соответствующий документ. Положения устава ${availableOrgs.split(',')[0]?.trim() || 'другой организации'} не применимы к ${organizationFilter.canonicalName}.`;
+      }
+    }
 
     // ШАГ 4: Форматируем результаты с полным контекстом документов
     // Извлекаем метаданные из текста для помощи AI
@@ -516,6 +708,7 @@ async function searchWithFullContent(
 /**
  * Функция для работы с Responses API с прикреплением файла
  * Используется для больших документов (уставы) - передаёт PDF напрямую в Grok
+ * @param organizationFilter - опциональный фильтр по организации (для уставов)
  * @returns объект с результатом или null если нужно использовать обычный поиск
  */
 async function chatWithFileAttachment(
@@ -523,11 +716,15 @@ async function chatWithFileAttachment(
   apiKey: string,
   collectionId: string,
   systemPrompt: string,
-  messages: any[]
+  messages: any[],
+  organizationFilter: OrganizationInfo | null = null
 ): Promise<Response | null> {
   console.log('=== Chat With File Attachment ===');
   console.log('Query:', query);
   console.log('Collection ID:', collectionId);
+  if (organizationFilter) {
+    console.log('Organization filter:', organizationFilter.canonicalName);
+  }
 
   try {
     // ШАГ 1: Поиск для определения релевантного документа
@@ -552,11 +749,27 @@ async function chatWithFileAttachment(
     }
 
     const searchData = await searchResponse.json();
-    const results = searchData.matches || searchData.results || [];
+    let results = searchData.matches || searchData.results || [];
 
     if (results.length === 0) {
       console.log('No documents found');
       return null;
+    }
+
+    // ШАГ 1.5: Фильтруем результаты по организации (если указан фильтр)
+    // Это критически важно для коллекции уставов, чтобы не путать уставы разных организаций
+    if (organizationFilter) {
+      const beforeFilter = results.length;
+      results = results.filter((r: any) => {
+        const fileName = r.fields?.file_name || r.fields?.name || '';
+        return fileMatchesOrganization(fileName, organizationFilter);
+      });
+      console.log(`Organization filter applied (file attachment): ${beforeFilter} -> ${results.length} documents`);
+
+      if (results.length === 0) {
+        console.log(`No documents found for organization: ${organizationFilter.canonicalName}`);
+        return null; // Fallback to regular search which will show the proper message
+      }
     }
 
     // ШАГ 2: Получаем file_id первого (наиболее релевантного) документа
@@ -2886,12 +3099,23 @@ if (isListAll) {
 
       if (useFileAttachment) {
         console.log(`Trying Responses API with file attachment for ${collectionKey}...`);
+
+        // Для коллекции уставов - извлекаем организацию из контекста диалога
+        let orgFilterForAttachment: OrganizationInfo | null = null;
+        if (collectionKey === 'articlesOfAssociation') {
+          orgFilterForAttachment = extractOrganizationFromMessages(messages);
+          if (orgFilterForAttachment) {
+            console.log(`File attachment: filtering by organization ${orgFilterForAttachment.canonicalName}`);
+          }
+        }
+
         const fileResponse = await chatWithFileAttachment(
           searchQuery,
           apiKey,
           collectionId,
           systemPrompt,
-          messages
+          messages,
+          orgFilterForAttachment
         );
 
         if (fileResponse) {
@@ -2919,7 +3143,20 @@ if (isListAll) {
       } else {
         // Для коллекций с большими документами - используем чанки (как раньше)
         const maxResults = collectionConfig?.maxSearchResults ?? 15;
-        documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults);
+
+        // Для коллекции уставов - извлекаем организацию из контекста диалога
+        // и фильтруем результаты, чтобы не путать уставы разных организаций
+        let organizationFilter: OrganizationInfo | null = null;
+        if (collectionKey === 'articlesOfAssociation') {
+          organizationFilter = extractOrganizationFromMessages(messages);
+          if (organizationFilter) {
+            console.log(`Articles of Association: filtering by organization ${organizationFilter.canonicalName}`);
+          } else {
+            console.log('Articles of Association: no specific organization detected, returning all results');
+          }
+        }
+
+        documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults, organizationFilter);
         console.log('Chunk search results length:', documentResults.length);
 
         contextSection = documentResults
