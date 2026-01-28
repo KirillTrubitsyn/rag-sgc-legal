@@ -10,7 +10,7 @@ import {
 import { classifyQueryWithLLM, type ClassificationResult } from '@/lib/query-classifier';
 
 export const runtime = 'edge';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // ============================================
 // ОРГАНИЗАЦИИ ГРУППЫ СГК И ИХ ВАРИАЦИИ НАЗВАНИЙ
@@ -1829,7 +1829,8 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       'подпись доверенность полномочия',
     ];
 
-    for (const query of searchQueries) {
+    // Выполняем все запросы параллельно для ускорения
+    const searchPromises = searchQueries.map(async (query) => {
       try {
         const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
           method: 'POST',
@@ -1850,32 +1851,40 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
           const searchData = await searchResponse.json();
           const results = searchData.matches || searchData.results || [];
           console.log(`Search query "${query.substring(0, 30)}..." returned ${results.length} results`);
+          return { query, results };
+        }
+        return { query, results: [] };
+      } catch (err) {
+        console.error(`Search query "${query}" failed:`, err);
+        return { query, results: [] };
+      }
+    });
 
-          for (const result of results) {
-            const fileId = result.file_id || '';
-            const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
-            const chunkContent = result.chunk_content || result.content || result.text || '';
+    const searchResults = await Promise.all(searchPromises);
 
-            if (fileId) {
-              if (fileName && !fileNamesByFileId.has(fileId)) {
-                fileNamesByFileId.set(fileId, fileName);
-              }
-              // Сохраняем чанки для извлечения дат
-              if (chunkContent) {
-                if (!contentChunksByFileId.has(fileId)) {
-                  contentChunksByFileId.set(fileId, []);
-                }
-                // Добавляем чанк только если его еще нет (избегаем дубликатов)
-                const existingChunks = contentChunksByFileId.get(fileId)!;
-                if (!existingChunks.includes(chunkContent)) {
-                  existingChunks.push(chunkContent);
-                }
-              }
+    // Обрабатываем результаты всех запросов
+    for (const { results } of searchResults) {
+      for (const result of results) {
+        const fileId = result.file_id || '';
+        const fileName = result.fields?.file_name || result.fields?.name || result.name || '';
+        const chunkContent = result.chunk_content || result.content || result.text || '';
+
+        if (fileId) {
+          if (fileName && !fileNamesByFileId.has(fileId)) {
+            fileNamesByFileId.set(fileId, fileName);
+          }
+          // Сохраняем чанки для извлечения дат
+          if (chunkContent) {
+            if (!contentChunksByFileId.has(fileId)) {
+              contentChunksByFileId.set(fileId, []);
+            }
+            // Добавляем чанк только если его еще нет (избегаем дубликатов)
+            const existingChunks = contentChunksByFileId.get(fileId)!;
+            if (!existingChunks.includes(chunkContent)) {
+              existingChunks.push(chunkContent);
             }
           }
         }
-      } catch (err) {
-        console.error(`Search query "${query}" failed:`, err);
       }
     }
 
@@ -2273,36 +2282,49 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     // Map для хранения имен файлов из результатов поиска
     const fileNamesByFileId = new Map<string, string>();
 
-    for (const query of searchQueries) {
-      const response = await fetch('https://api.x.ai/v1/documents/search', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: query,
-          source: { collection_ids: [collectionId] },
-          retrieval_mode: { type: 'hybrid' },
-          max_num_results: 100,
-          top_k: 100,
-        }),
-      });
+    // Выполняем все запросы параллельно для ускорения (вместо последовательного for loop)
+    const searchPromises = searchQueries.map(async (query) => {
+      try {
+        const response = await fetch('https://api.x.ai/v1/documents/search', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: query,
+            source: { collection_ids: [collectionId] },
+            retrieval_mode: { type: 'hybrid' },
+            max_num_results: 100,
+            top_k: 100,
+          }),
+        });
 
-      if (!response.ok) continue;
+        if (!response.ok) return { query, results: [] };
 
-      const data = await response.json();
-      const results = data.matches || data.results || [];
+        const data = await response.json();
+        const results = data.matches || data.results || [];
 
-      // Логируем первый результат первого поиска для отладки
-      if (query === 'доверенность' && results.length > 0) {
-        console.log('=== SEARCH API FIRST RESULT ===');
-        console.log('Result keys:', Object.keys(results[0]));
-        console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
-        console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
-        console.log('=== END SEARCH RESULT ===');
+        // Логируем первый результат первого поиска для отладки
+        if (query === 'доверенность' && results.length > 0) {
+          console.log('=== SEARCH API FIRST RESULT ===');
+          console.log('Result keys:', Object.keys(results[0]));
+          console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
+          console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
+          console.log('=== END SEARCH RESULT ===');
+        }
+
+        return { query, results };
+      } catch (err) {
+        console.error(`Search query "${query}" failed:`, err);
+        return { query, results: [] };
       }
+    });
 
+    const allSearchResults = await Promise.all(searchPromises);
+
+    // Обрабатываем результаты всех запросов
+    for (const { results } of allSearchResults) {
       for (const result of results) {
         const fileId = result.file_id || '';
         const content = result.chunk_content || result.content || result.text || '';
