@@ -52,11 +52,12 @@ async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<Que
   // Проверяем, запрашивает ли пользователь полный список
   const isListAll = isListAllQuery(lastMessage);
 
-  // Собираем контекст диалога (последние 2-3 сообщения для понимания темы)
+  // Собираем контекст диалога (последние сообщения для понимания темы)
   let conversationContext = '';
   if (messages.length > 1) {
-    // Берём последние сообщения для контекста (но не более 3 пар user/assistant)
-    const recentMessages = messages.slice(-6);
+    // Берём последние сообщения для контекста (до 5 пар user/assistant для сохранения контекста в длинных диалогах)
+    const recentMessages = messages.slice(-10);
+    console.log(`Building conversation context: ${messages.length} total messages, using last ${Math.min(messages.length, 10)}`);
     conversationContext = recentMessages
       .filter((m: any) => m.role === 'user' || m.role === 'assistant')
       .slice(0, -1) // Исключаем последнее (текущее) сообщение
@@ -2392,11 +2393,13 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
 }
 
 // Функция формирования поискового запроса с учетом контекста диалога
-function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): string {
+function buildContextualSearchQuery(messages: any[], maxMessages: number = 5): string {
   // Получаем последние N сообщений пользователя для учета контекста
-  const userMessages = messages
-    .filter((m: any) => m.role === 'user')
-    .slice(-maxMessages);
+  // Увеличено до 5 для сохранения контекста в длинных диалогах (4+ вопросов)
+  const allUserMessages = messages.filter((m: any) => m.role === 'user');
+  const userMessages = allUserMessages.slice(-maxMessages);
+
+  console.log(`Building search query: ${allUserMessages.length} total user messages, using last ${userMessages.length}`);
 
   if (userMessages.length === 0) {
     return '';
@@ -2942,7 +2945,11 @@ if (isListAll) {
       content: m.content,
     }));
 
-    console.log('Calling xAI Chat API...');
+    // Логируем информацию о контексте для отладки
+    const userMsgCount = apiMessages.filter((m: any) => m.role === 'user').length;
+    const assistantMsgCount = apiMessages.filter((m: any) => m.role === 'assistant').length;
+    const totalContentLength = apiMessages.reduce((sum: number, m: any) => sum + m.content.length, 0);
+    console.log(`Calling xAI Chat API with ${apiMessages.length} messages (${userMsgCount} user, ${assistantMsgCount} assistant), total content: ${totalContentLength} chars`);
 
     // Используем обычный Chat Completions API
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
