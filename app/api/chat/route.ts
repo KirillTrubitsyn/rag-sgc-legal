@@ -670,9 +670,22 @@ async function searchWithFullContent(
     console.log('Unique files to download:', uniqueFiles.size);
 
     // ШАГ 3: Скачиваем полный текст каждого уникального документа
+    // Если полный текст не удалось загрузить - используем чанки как fallback
     const fullContentResults: FullContentSearchResult[] = await Promise.all(
       Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
-        const content = await getFullDocumentContent(apiKey, fileId);
+        // Сначала пробуем загрузить полный контент
+        let content = await getFullDocumentContent(apiKey, fileId);
+
+        // Если полный контент не получен - fallback на чанки
+        if (!content || content.length === 0) {
+          console.log(`Full content not available for ${fileId}, falling back to chunks...`);
+          const chunks = await getChunksForFile(apiKey, collectionId, fileId, meta.fileName);
+          if (chunks.length > 0) {
+            content = chunks.join('\n\n');
+            console.log(`Fallback: got ${chunks.length} chunks for ${fileId}, total ${content.length} chars`);
+          }
+        }
+
         return {
           fileId,
           fileName: meta.fileName,
@@ -682,7 +695,7 @@ async function searchWithFullContent(
       })
     );
 
-    // Фильтруем документы без контента
+    // Фильтруем документы без контента (после попытки загрузки и fallback)
     const validResults = fullContentResults.filter(r => r.content.length > 0);
     console.log('Documents with content:', validResults.length);
 

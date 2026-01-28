@@ -39,7 +39,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Доверенности',
     description: 'Доверенности и полномочия сотрудников группы СГК',
     priority: 10, // Высокий приоритет - проверяется первым
-    useFullContent: true, // Загружаем ПОЛНЫЙ текст документов, чтобы ничего не потерялось в чанках
+    useFullContent: true, // Сначала пробуем загрузить полный текст, если не получится - fallback на чанки
     useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     maxTokensPerDoc: 5000, // Примерный размер доверенности в токенах (увеличен для полного текста)
     keywords: [
@@ -84,7 +84,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Формы договоров',
     description: 'Шаблоны и формы типовых договоров',
     priority: 5,
-    useFullContent: true, // Шаблоны обычно небольшие - загружать целиком
+    useFullContent: true, // Сначала пробуем загрузить полный текст, если не получится - fallback на чанки
     useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     maxTokensPerDoc: 5000,
     keywords: [
@@ -148,7 +148,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Уставы',
     description: 'Уставы организаций группы компаний СГК',
     priority: 5,
-    useFullContent: false, // Используем чанки - полный текст слишком большой для API
+    useFullContent: true, // Сначала пробуем загрузить полный текст, если не получится - fallback на чанки
     useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     maxTokensPerDoc: 50000,
     maxSearchResults: 100, // Увеличено для полного охвата разделов о компетенции
@@ -222,7 +222,7 @@ export const COLLECTIONS_CONFIG: Record<string, CollectionConfig> = {
     displayName: 'Стандарты и регламенты',
     description: 'Нормативные документы, стандарты, положения и регламенты СГК',
     priority: 3,
-    useFullContent: false, // Большие документы - использовать чанки
+    useFullContent: true, // Сначала пробуем загрузить полный текст, если не получится - fallback на чанки
     useFileAttachment: true, // Использовать Responses API с файлом для полного анализа
     keywords: [
       // Основные термины
