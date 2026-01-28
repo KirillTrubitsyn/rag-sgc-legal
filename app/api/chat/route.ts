@@ -13,6 +13,33 @@ export const runtime = 'edge';
 export const maxDuration = 120;
 
 // ============================================
+// ХЕЛПЕР ДЛЯ БАТЧИНГА ПАРАЛЛЕЛЬНЫХ ЗАПРОСОВ
+// ============================================
+
+// Выполняет промисы батчами для предотвращения rate limiting
+async function executeBatched<T, R>(
+  items: T[],
+  batchSize: number,
+  processor: (item: T) => Promise<R>,
+  delayBetweenBatches: number = 100
+): Promise<R[]> {
+  const results: R[] = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(processor));
+    results.push(...batchResults);
+
+    // Добавляем небольшую задержку между батчами для предотвращения rate limiting
+    if (i + batchSize < items.length) {
+      await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+    }
+  }
+
+  return results;
+}
+
+// ============================================
 // ОРГАНИЗАЦИИ ГРУППЫ СГК И ИХ ВАРИАЦИИ НАЗВАНИЙ
 // ============================================
 
@@ -1829,38 +1856,41 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       'подпись доверенность полномочия',
     ];
 
-    // Выполняем все запросы параллельно для ускорения
-    const searchPromises = searchQueries.map(async (query) => {
-      try {
-        const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query,
-            source: { collection_ids: [collectionId] },
-            retrieval_mode: { type: 'hybrid' },
-            max_num_results: 100,
-            top_k: 100,
-          }),
-        });
+    // Выполняем запросы батчами по 2 для предотвращения rate limiting
+    const searchResults = await executeBatched(
+      searchQueries,
+      2, // batch size
+      async (query: string) => {
+        try {
+          const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query,
+              source: { collection_ids: [collectionId] },
+              retrieval_mode: { type: 'hybrid' },
+              max_num_results: 100,
+              top_k: 100,
+            }),
+          });
 
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json();
-          const results = searchData.matches || searchData.results || [];
-          console.log(`Search query "${query.substring(0, 30)}..." returned ${results.length} results`);
-          return { query, results };
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            const results = searchData.matches || searchData.results || [];
+            console.log(`Search query "${query.substring(0, 30)}..." returned ${results.length} results`);
+            return { query, results };
+          }
+          return { query, results: [] as any[] };
+        } catch (err) {
+          console.error(`Search query "${query}" failed:`, err);
+          return { query, results: [] as any[] };
         }
-        return { query, results: [] };
-      } catch (err) {
-        console.error(`Search query "${query}" failed:`, err);
-        return { query, results: [] };
-      }
-    });
-
-    const searchResults = await Promise.all(searchPromises);
+      },
+      100 // delay between batches in ms
+    );
 
     // Обрабатываем результаты всех запросов
     for (const { results } of searchResults) {
@@ -2282,46 +2312,49 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
     // Map для хранения имен файлов из результатов поиска
     const fileNamesByFileId = new Map<string, string>();
 
-    // Выполняем все запросы параллельно для ускорения (вместо последовательного for loop)
-    const searchPromises = searchQueries.map(async (query) => {
-      try {
-        const response = await fetch('https://api.x.ai/v1/documents/search', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: query,
-            source: { collection_ids: [collectionId] },
-            retrieval_mode: { type: 'hybrid' },
-            max_num_results: 100,
-            top_k: 100,
-          }),
-        });
+    // Выполняем запросы батчами по 5 для предотвращения rate limiting
+    const allSearchResults = await executeBatched(
+      searchQueries,
+      5, // batch size
+      async (query: string) => {
+        try {
+          const response = await fetch('https://api.x.ai/v1/documents/search', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: query,
+              source: { collection_ids: [collectionId] },
+              retrieval_mode: { type: 'hybrid' },
+              max_num_results: 100,
+              top_k: 100,
+            }),
+          });
 
-        if (!response.ok) return { query, results: [] };
+          if (!response.ok) return { query, results: [] as any[] };
 
-        const data = await response.json();
-        const results = data.matches || data.results || [];
+          const data = await response.json();
+          const results = data.matches || data.results || [];
 
-        // Логируем первый результат первого поиска для отладки
-        if (query === 'доверенность' && results.length > 0) {
-          console.log('=== SEARCH API FIRST RESULT ===');
-          console.log('Result keys:', Object.keys(results[0]));
-          console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
-          console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
-          console.log('=== END SEARCH RESULT ===');
+          // Логируем первый результат первого поиска для отладки
+          if (query === 'доверенность' && results.length > 0) {
+            console.log('=== SEARCH API FIRST RESULT ===');
+            console.log('Result keys:', Object.keys(results[0]));
+            console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
+            console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
+            console.log('=== END SEARCH RESULT ===');
+          }
+
+          return { query, results };
+        } catch (err) {
+          console.error(`Search query "${query}" failed:`, err);
+          return { query, results: [] as any[] };
         }
-
-        return { query, results };
-      } catch (err) {
-        console.error(`Search query "${query}" failed:`, err);
-        return { query, results: [] };
-      }
-    });
-
-    const allSearchResults = await Promise.all(searchPromises);
+      },
+      150 // delay between batches in ms
+    );
 
     // Обрабатываем результаты всех запросов
     for (const { results } of allSearchResults) {
