@@ -2605,6 +2605,42 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
   }
 }
 
+// Расширение поискового запроса для судебных полномочий
+// Проблема: "мировое соглашение" в доверенностях указано в разделе "судебное представительство"
+// Решение: добавляем связанные термины для поиска нужных чанков
+function expandSearchQueryForCourtPowers(query: string): string {
+  const lowerQuery = query.toLowerCase();
+  const expansions: string[] = [];
+
+  // Если ищем мировое соглашение - добавляем судебные термины
+  if (lowerQuery.includes('мировое') || lowerQuery.includes('мировой') || lowerQuery.includes('мировому')) {
+    expansions.push('судебное представительство', 'арбитражный суд', 'представлять интересы в суде');
+  }
+
+  // Если ищем примирение
+  if (lowerQuery.includes('примирен') || lowerQuery.includes('примиритель')) {
+    expansions.push('мировое соглашение', 'судебное представительство');
+  }
+
+  // Если ищем отказ от иска, признание иска
+  if (lowerQuery.includes('отказ от иска') || lowerQuery.includes('признание иска') || lowerQuery.includes('уменьшение иск')) {
+    expansions.push('судебное представительство', 'арбитражный суд', 'полномочия в суде');
+  }
+
+  // Если ищем судебные полномочия
+  if (lowerQuery.includes('суд') && (lowerQuery.includes('полномочи') || lowerQuery.includes('представ'))) {
+    expansions.push('мировое соглашение', 'арбитражный суд', 'отказ от иска');
+  }
+
+  if (expansions.length > 0) {
+    const expandedQuery = `${query} ${expansions.join(' ')}`;
+    console.log('Expanded search query for court powers:', expandedQuery.substring(0, 200));
+    return expandedQuery;
+  }
+
+  return query;
+}
+
 // Функция формирования поискового запроса с учетом контекста диалога
 function buildContextualSearchQuery(messages: any[], maxMessages: number = 7): string {
   // Получаем последние N сообщений пользователя для учета контекста
@@ -3092,7 +3128,14 @@ if (isListAll) {
       }
     } else {
       // Для обычных запросов - используем поиск
-      const searchQuery = buildContextualSearchQuery(messages, 7);
+      let searchQuery = buildContextualSearchQuery(messages, 7);
+
+      // Для доверенностей: расширяем запрос судебными терминами
+      // Это решает проблему когда "мировое соглашение" ищется, но полномочия
+      // описаны как "судебное представительство" в другом пункте доверенности
+      if (collectionKey === 'poa') {
+        searchQuery = expandSearchQueryForCourtPowers(searchQuery);
+      }
 
       // Проверяем, нужно ли использовать Responses API с прикреплением файла
       // Это позволяет Grok работать с полным PDF документом
