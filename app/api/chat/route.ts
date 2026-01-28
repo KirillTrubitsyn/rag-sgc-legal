@@ -213,11 +213,12 @@ async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<Que
   // Проверяем, запрашивает ли пользователь полный список
   const isListAll = isListAllQuery(lastMessage);
 
-  // Собираем контекст диалога (последние 2-3 сообщения для понимания темы)
+  // Собираем контекст диалога (последние сообщения для понимания темы)
   let conversationContext = '';
   if (messages.length > 1) {
-    // Берём последние сообщения для контекста (но не более 3 пар user/assistant)
-    const recentMessages = messages.slice(-6);
+    // Берём последние сообщения для контекста (до 7 пар user/assistant)
+    const recentMessages = messages.slice(-14);
+    console.log(`analyzeQueryWithLLM: using ${Math.min(messages.length, 14)} messages for context`);
     conversationContext = recentMessages
       .filter((m: any) => m.role === 'user' || m.role === 'assistant')
       .slice(0, -1) // Исключаем последнее (текущее) сообщение
@@ -2605,7 +2606,7 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
 }
 
 // Функция формирования поискового запроса с учетом контекста диалога
-function buildContextualSearchQuery(messages: any[], maxMessages: number = 3): string {
+function buildContextualSearchQuery(messages: any[], maxMessages: number = 7): string {
   // Получаем последние N сообщений пользователя для учета контекста
   const userMessages = messages
     .filter((m: any) => m.role === 'user')
@@ -3091,7 +3092,7 @@ if (isListAll) {
       }
     } else {
       // Для обычных запросов - используем поиск
-      const searchQuery = buildContextualSearchQuery(messages, 3);
+      const searchQuery = buildContextualSearchQuery(messages, 7);
 
       // Проверяем, нужно ли использовать Responses API с прикреплением файла
       // Это позволяет Grok работать с полным PDF документом
