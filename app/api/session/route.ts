@@ -6,7 +6,6 @@
 
 import { getSessionStore, isValidSessionId, generateSessionId } from '@/lib/session';
 
-export const runtime = 'edge';
 
 // GET /api/session?sessionId=xxx - получить статистику сессии
 export async function GET(req: Request) {

@@ -15,8 +15,6 @@ import {
   type DocumentContext,
 } from '@/lib/session';
 
-export const runtime = 'edge';
-export const maxDuration = 120;
 
 // ============================================
 // ХЕЛПЕР ДЛЯ БАТЧИНГА ПАРАЛЛЕЛЬНЫХ ЗАПРОСОВ

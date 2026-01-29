@@ -1,36 +1,37 @@
 /**
  * Session Store Factory
  * Автоматически выбирает Redis или Memory store
- *
- * ВАЖНО: RedisSessionStore не импортируется статически,
- * так как ioredis не работает в Edge Runtime (Vercel).
- * Redis будет использоваться только на Railway/Node.js runtime.
  */
 
 export * from './types';
 export { MemorySessionStore } from './memory-store';
-// RedisSessionStore экспортируется через динамический импорт для Node.js runtime
+export { RedisSessionStore } from './redis-store';
 
 import { ISessionStore, SessionOptions } from './types';
 import { MemorySessionStore } from './memory-store';
+import { RedisSessionStore } from './redis-store';
 
 // Глобальный singleton для store
 let globalStore: ISessionStore | null = null;
 
 /**
  * Создаёт или возвращает существующий Session Store
- * В Edge Runtime (Vercel) всегда используется Memory store
- * На Railway/Node.js с REDIS_URL будет использоваться Redis
+ * Использует Redis если есть REDIS_URL, иначе Memory
  */
 export function getSessionStore(options?: SessionOptions): ISessionStore {
   if (globalStore) {
     return globalStore;
   }
 
-  // В Edge Runtime используем только Memory store
-  // Redis требует Node.js runtime (net, tls модули)
-  console.log('[SessionStore] Using Memory store (Edge Runtime compatible)');
-  globalStore = new MemorySessionStore(options);
+  const redisUrl = process.env.REDIS_URL;
+
+  if (redisUrl) {
+    console.log('[SessionStore] Using Redis store');
+    globalStore = new RedisSessionStore(redisUrl, options);
+  } else {
+    console.log('[SessionStore] Using Memory store');
+    globalStore = new MemorySessionStore(options);
+  }
 
   return globalStore;
 }
