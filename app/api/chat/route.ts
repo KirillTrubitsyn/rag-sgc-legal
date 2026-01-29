@@ -15,6 +15,9 @@ import {
   type DocumentContext,
 } from '@/lib/session';
 
+// Устанавливаем максимальную продолжительность для Node.js runtime (в секундах)
+export const maxDuration = 120;
+
 
 // ============================================
 // ХЕЛПЕР ДЛЯ БАТЧИНГА ПАРАЛЛЕЛЬНЫХ ЗАПРОСОВ
@@ -2891,11 +2894,14 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { messages, sessionId: clientSessionId } = body;
 
+    // Диагностика: логируем количество и размер сообщений
+    const totalContentLength = messages.reduce((acc: number, m: any) => acc + (m.content?.length || 0), 0);
+    console.log(`[Chat] Messages: ${messages.length}, Total content size: ${totalContentLength} chars, Session: ${clientSessionId || 'new'}`);
+
     // Получаем или создаём sessionId
     let sessionId = clientSessionId;
     if (!sessionId || !isValidSessionId(sessionId)) {
       sessionId = generateSessionId();
-    } else {
     }
 
     // Получаем session store
