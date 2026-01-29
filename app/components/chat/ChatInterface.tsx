@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useChat } from 'ai/react';
-import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload, Maximize2, Minimize2, X } from 'lucide-react';
+import { Send, FileText, AlertCircle, RotateCcw, ChevronDown, ChevronUp, Link2, Download, Upload, Maximize2, Minimize2, X, Database } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -442,10 +442,56 @@ async function uploadFile(file: File): Promise<FileUploadResult> {
   return res.json();
 }
 
+// Генерация sessionId на клиенте
+function generateClientSessionId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 10);
+  return `sess_${timestamp}_${random}`;
+}
+
 export default function ChatInterface() {
+  // Состояние сессии - сохраняем между запросами
+  const [sessionId, setSessionId] = useState<string>(() => {
+    // Пробуем восстановить из sessionStorage
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('chat_session_id');
+      if (saved) return saved;
+    }
+    return generateClientSessionId();
+  });
+
+  const [sessionStats, setSessionStats] = useState<{
+    documentsCount: number;
+    totalTokens: number;
+  } | null>(null);
+
+  // Сохраняем sessionId в sessionStorage
+  useEffect(() => {
+    if (sessionId && typeof window !== 'undefined') {
+      sessionStorage.setItem('chat_session_id', sessionId);
+    }
+  }, [sessionId]);
+
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages, setInput, append } = useChat({
     api: '/api/chat',
+    body: {
+      sessionId, // Передаём sessionId с каждым запросом
+    },
+    onResponse: async (response) => {
+      // Получаем sessionId из ответа (если сервер его создал/изменил)
+      const serverSessionId = response.headers.get('X-Session-Id');
+      if (serverSessionId && serverSessionId !== sessionId) {
+        console.log('Received new sessionId from server:', serverSessionId);
+        setSessionId(serverSessionId);
+      }
+
+      // Обновляем статистику сессии после ответа
+      setTimeout(() => {
+        fetchSessionStats();
+      }, 1000);
+    },
   });
+
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Состояния для загруженных документов
@@ -455,12 +501,46 @@ export default function ChatInterface() {
   // Состояние для полноэкранной таблицы
   const [fullscreenTableHtml, setFullscreenTableHtml] = useState<string | null>(null);
 
-  const handleNewQuery = () => {
+  // Функция для получения статистики сессии
+  const fetchSessionStats = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/session?sessionId=${sessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.exists) {
+          setSessionStats({
+            documentsCount: data.documentsCount || 0,
+            totalTokens: data.totalTokens || 0,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch session stats:', e);
+    }
+  }, [sessionId]);
+
+  // Загружаем статистику при монтировании
+  useEffect(() => {
+    fetchSessionStats();
+  }, [fetchSessionStats]);
+
+  const handleNewQuery = useCallback(async () => {
+    // Очищаем сессию на сервере
+    try {
+      await fetch(`/api/session?sessionId=${sessionId}&action=clear`, { method: 'DELETE' });
+    } catch (e) {
+      console.error('Failed to clear session:', e);
+    }
+
+    // Создаём новую сессию
+    const newSessionId = generateClientSessionId();
+    setSessionId(newSessionId);
     setMessages([]);
     setInput('');
     setUploadedFiles([]);
     setCapturedPhotos([]);
-  };
+    setSessionStats(null);
+  }, [sessionId, setMessages, setInput]);
 
   // Обработчик голосового ввода
   const handleVoiceTranscript = useCallback((text: string) => {
@@ -645,6 +725,20 @@ export default function ChatInterface() {
               <img src="/sgc_search_horizontal_logo3.png" alt="SGC Legal Search" className="h-[46px] sm:h-[72px] object-contain" />
             </div>
           </div>
+
+          {/* Индикатор активной сессии с кэшированными документами */}
+          {sessionStats && sessionStats.documentsCount > 0 && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sgc-orange-500/20 text-white text-xs">
+              <Database className="w-3.5 h-3.5 text-sgc-orange-400" />
+              <span>
+                {sessionStats.documentsCount} док. в контексте
+                <span className="text-white/60 ml-1">
+                  (~{Math.round(sessionStats.totalTokens / 1000)}K токенов)
+                </span>
+              </span>
+            </div>
+          )}
+
           {messages.length > 0 && (
             <button
               onClick={handleNewQuery}

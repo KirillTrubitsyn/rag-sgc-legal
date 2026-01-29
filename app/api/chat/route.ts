@@ -8,6 +8,12 @@ import {
   COLLECTIONS_CONFIG
 } from '@/lib/collections-config';
 import { classifyQueryWithLLM, type ClassificationResult } from '@/lib/query-classifier';
+import {
+  getSessionStore,
+  generateSessionId,
+  isValidSessionId,
+  type DocumentContext,
+} from '@/lib/session';
 
 export const runtime = 'edge';
 export const maxDuration = 120;
@@ -698,9 +704,22 @@ async function searchWithFullContent(
     console.log('Unique files to download:', uniqueFiles.size);
 
     // ШАГ 3: Скачиваем полный текст каждого уникального документа
+    // Если полный текст не удалось загрузить - используем чанки как fallback
     const fullContentResults: FullContentSearchResult[] = await Promise.all(
       Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
-        const content = await getFullDocumentContent(apiKey, fileId);
+        // Сначала пробуем загрузить полный контент
+        let content = await getFullDocumentContent(apiKey, fileId);
+
+        // Если полный контент не получен - fallback на чанки
+        if (!content || content.length === 0) {
+          console.log(`Full content not available for ${fileId}, falling back to chunks...`);
+          const chunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
+          if (chunks.length > 0) {
+            content = chunks.join('\n\n');
+            console.log(`Fallback: got ${chunks.length} chunks for ${fileId}, total ${content.length} chars`);
+          }
+        }
+
         return {
           fileId,
           fileName: meta.fileName,
@@ -710,7 +729,7 @@ async function searchWithFullContent(
       })
     );
 
-    // Фильтруем документы без контента
+    // Фильтруем документы без контента (после попытки загрузки и fallback)
     const validResults = fullContentResults.filter(r => r.content.length > 0);
     console.log('Documents with content:', validResults.length);
 
@@ -730,6 +749,153 @@ async function searchWithFullContent(
   } catch (error) {
     console.error('Search with full content error:', error);
     return '';
+  }
+}
+
+// Интерфейс для результата поиска с кэшированием
+interface SearchWithCacheResult {
+  formattedResults: string;
+  documents: DocumentContext[];
+  cached: boolean;
+}
+
+/**
+ * Поиск с полным текстом и кэшированием в сессии
+ * Загружает документы и сохраняет их в session store для последующих запросов
+ */
+async function searchWithFullContentAndCache(
+  query: string,
+  apiKey: string,
+  collectionId: string,
+  collectionKey: string,
+  sessionId: string,
+  sessionStore: import('@/lib/session').ISessionStore
+): Promise<SearchWithCacheResult> {
+  console.log('=== Search With Full Content And Cache ===');
+  console.log('Query:', query);
+  console.log('Collection:', collectionKey);
+  console.log('Session:', sessionId);
+
+  try {
+    // ШАГ 1: Обычный поиск для определения релевантных документов
+    const requestBody = {
+      query: query,
+      source: {
+        collection_ids: [collectionId]
+      },
+      retrieval_mode: {
+        type: 'hybrid'
+      },
+      max_num_results: 10,
+      top_k: 10
+    };
+
+    const response = await fetch('https://api.x.ai/v1/documents/search', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Search failed:', response.status, errorText);
+      return { formattedResults: '', documents: [], cached: false };
+    }
+
+    const data = await response.json();
+    const results = data.matches || data.results || [];
+    console.log('Initial search returned', results.length, 'results');
+
+    if (results.length === 0) {
+      return { formattedResults: '', documents: [], cached: false };
+    }
+
+    // ШАГ 2: Получаем уникальные file_id и их метаданные
+    const uniqueFiles = new Map<string, { fileName: string; score: number }>();
+
+    for (const result of results) {
+      const fileId = result.file_id || '';
+      if (fileId && !uniqueFiles.has(fileId)) {
+        uniqueFiles.set(fileId, {
+          fileName: result.fields?.file_name || result.fields?.name || 'Документ',
+          score: result.score || 0
+        });
+      }
+    }
+
+    console.log('Unique files to download:', uniqueFiles.size);
+
+    // ШАГ 3: Скачиваем полный текст и создаём DocumentContext для кэширования
+    const documentContexts: DocumentContext[] = [];
+
+    await Promise.all(
+      Array.from(uniqueFiles.entries()).map(async ([fileId, meta]) => {
+        // Сначала пробуем загрузить полный контент
+        let content = await getFullDocumentContent(apiKey, fileId);
+        let source: 'full' | 'chunks' = 'full';
+
+        // Если полный контент не получен - fallback на чанки
+        if (!content || content.length === 0) {
+          console.log(`Full content not available for ${fileId}, falling back to chunks...`);
+          const chunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
+          if (chunks.length > 0) {
+            content = chunks.join('\n\n');
+            source = 'chunks';
+            console.log(`Fallback: got ${chunks.length} chunks for ${fileId}, total ${content.length} chars`);
+          }
+        }
+
+        if (content && content.length > 0) {
+          documentContexts.push({
+            fileId,
+            fileName: meta.fileName,
+            content,
+            collectionKey,
+            score: meta.score,
+            loadedAt: Date.now(),
+            source,
+          });
+        }
+      })
+    );
+
+    console.log('Documents with content:', documentContexts.length);
+
+    // ШАГ 4: Сохраняем в кэш сессии
+    if (documentContexts.length > 0) {
+      const addResult = await sessionStore.addDocuments(
+        sessionId,
+        collectionKey,
+        collectionId,
+        documentContexts,
+        query
+      );
+      console.log('Cache add result:', addResult);
+    }
+
+    // ШАГ 5: Форматируем результаты
+    const formattedResults = documentContexts.map((doc, i) => {
+      const encodedFilename = encodeURIComponent(doc.fileName);
+      const downloadUrl = `/api/download?file_id=${doc.fileId}&filename=${encodedFilename}`;
+      const markdownLink = `[Скачать](${downloadUrl})`;
+
+      return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nИсточник: ${doc.source === 'full' ? 'полный текст' : 'чанки'}\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
+    }).join('\n\n---\n\n');
+
+    console.log('Formatted results length:', formattedResults.length);
+
+    return {
+      formattedResults,
+      documents: documentContexts,
+      cached: true,
+    };
+
+  } catch (error) {
+    console.error('Search with full content and cache error:', error);
+    return { formattedResults: '', documents: [], cached: false };
   }
 }
 
@@ -2885,7 +3051,7 @@ function createResponsesStreamResponse(response: Response): Response {
   });
 }
 
-function createStreamResponse(response: Response): Response {
+function createStreamResponse(response: Response, sessionId?: string): Response {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let chunkCount = 0;
@@ -2948,10 +3114,16 @@ function createStreamResponse(response: Response): Response {
     }
   });
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/plain; charset=utf-8',
+  };
+
+  if (sessionId) {
+    headers['X-Session-Id'] = sessionId;
+  }
+
   return new Response(response.body?.pipeThrough(transformStream), {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-    },
+    headers,
   });
 }
 
@@ -2959,8 +3131,21 @@ export async function POST(req: Request) {
   console.log('=== Chat API called ===');
 
   try {
-    const { messages } = await req.json();
+    const body = await req.json();
+    const { messages, sessionId: clientSessionId } = body;
     console.log('Messages received:', messages.length);
+
+    // Получаем или создаём sessionId
+    let sessionId = clientSessionId;
+    if (!sessionId || !isValidSessionId(sessionId)) {
+      sessionId = generateSessionId();
+      console.log('Generated new sessionId:', sessionId);
+    } else {
+      console.log('Using client sessionId:', sessionId);
+    }
+
+    // Получаем session store
+    const sessionStore = getSessionStore();
 
     const apiKey = process.env.XAI_API_KEY;
 
@@ -3226,41 +3411,70 @@ if (isListAll) {
         console.log('Responses API failed, falling back to chunk search...');
       }
 
-      // Проверяем, нужно ли использовать полный текст документов
-      const useFullContent = collectionConfig?.useFullContent ?? false;
+      // ШАГ 1: Проверяем кэш сессии
+      const cachedContext = await sessionStore.getCollectionContext(sessionId, collectionKey);
 
-      if (useFullContent) {
-        // Для коллекций с небольшими документами (доверенности и т.п.)
-        // скачиваем полный текст вместо чанков
-        console.log('Using full content mode for collection:', collectionKey);
-        documentResults = await searchWithFullContent(searchQuery, apiKey, collectionId);
-        console.log('Full content search results length:', documentResults.length);
+      if (cachedContext && cachedContext.documents.length > 0) {
+        // Используем кэшированный контекст
+        console.log(`Using cached context for ${collectionKey}: ${cachedContext.documents.length} documents`);
 
-        contextSection = documentResults
-          ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ (ПОЛНЫЙ ТЕКСТ):\n${documentResults}\n\nВАЖНО: Выше представлен ПОЛНЫЙ текст каждого найденного документа. Используйте всю информацию из документов для точного и полного ответа.`
+        const cachedFormatted = await sessionStore.getFormattedContext(sessionId);
+        contextSection = cachedFormatted
+          ? `\n\nКОНТЕКСТ СЕССИИ (кэшированные документы):\n${cachedFormatted}\n\nВАЖНО: Используйте информацию из документов выше для ответа. Документы были загружены ранее в этой сессии.`
           : '\n\nПоиск по документам не вернул результатов.';
+
+        documentResults = cachedFormatted;
       } else {
-        // Для коллекций с большими документами - используем чанки (как раньше)
-        const maxResults = collectionConfig?.maxSearchResults ?? 15;
+        // Кэша нет - загружаем документы
+        console.log(`No cache for ${collectionKey}, loading documents...`);
 
-        // Для коллекции уставов - извлекаем организацию из контекста диалога
-        // и фильтруем результаты, чтобы не путать уставы разных организаций
-        let organizationFilter: OrganizationInfo | null = null;
-        if (collectionKey === 'articlesOfAssociation') {
-          organizationFilter = extractOrganizationFromMessages(messages);
-          if (organizationFilter) {
-            console.log(`Articles of Association: filtering by organization ${organizationFilter.canonicalName}`);
-          } else {
-            console.log('Articles of Association: no specific organization detected, returning all results');
+        // Проверяем, нужно ли использовать полный текст документов
+        const useFullContent = collectionConfig?.useFullContent ?? false;
+
+        if (useFullContent) {
+          // Для коллекций с небольшими документами (доверенности и т.п.)
+          // скачиваем полный текст вместо чанков
+          console.log('Using full content mode for collection:', collectionKey);
+
+          // Загружаем документы с полным текстом
+          const searchResults = await searchWithFullContentAndCache(
+            searchQuery,
+            apiKey,
+            collectionId,
+            collectionKey,
+            sessionId,
+            sessionStore
+          );
+
+          documentResults = searchResults.formattedResults;
+          console.log('Full content search results length:', documentResults.length);
+
+          contextSection = documentResults
+            ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ (ПОЛНЫЙ ТЕКСТ):\n${documentResults}\n\nВАЖНО: Выше представлен ПОЛНЫЙ текст каждого найденного документа. Эти документы сохранены в контексте сессии и будут доступны для последующих вопросов.`
+            : '\n\nПоиск по документам не вернул результатов.';
+        } else {
+          // Для коллекций с большими документами - используем чанки (как раньше)
+          const maxResults = collectionConfig?.maxSearchResults ?? 15;
+
+          // Для коллекции уставов - извлекаем организацию из контекста диалога
+          // и фильтруем результаты, чтобы не путать уставы разных организаций
+          let organizationFilter: OrganizationInfo | null = null;
+          if (collectionKey === 'articlesOfAssociation') {
+            organizationFilter = extractOrganizationFromMessages(messages);
+            if (organizationFilter) {
+              console.log(`Articles of Association: filtering by organization ${organizationFilter.canonicalName}`);
+            } else {
+              console.log('Articles of Association: no specific organization detected, returning all results');
+            }
           }
+
+          documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults, organizationFilter);
+          console.log('Chunk search results length:', documentResults.length);
+
+          contextSection = documentResults
+            ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${documentResults}\n\nИспользуйте информацию из найденных документов для ответа.`
+            : '\n\nПоиск по документам не вернул результатов.';
         }
-
-        documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults, organizationFilter);
-        console.log('Chunk search results length:', documentResults.length);
-
-        contextSection = documentResults
-          ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${documentResults}\n\nИспользуйте информацию из найденных документов для ответа.`
-          : '\n\nПоиск по документам не вернул результатов.';
       }
     }
 
@@ -3322,7 +3536,7 @@ if (isListAll) {
       );
     }
 
-    return createStreamResponse(response);
+    return createStreamResponse(response, sessionId);
 
   } catch (error) {
     console.error('Chat API error:', error);
