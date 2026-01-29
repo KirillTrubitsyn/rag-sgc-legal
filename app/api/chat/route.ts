@@ -123,7 +123,6 @@ function extractOrganizationFromText(text: string): OrganizationInfo | null {
   for (const org of SGK_ORGANIZATIONS) {
     for (const name of org.shortNames) {
       if (lowerText.includes(name)) {
-        console.log(`Extracted organization: ${org.canonicalName} (matched: "${name}")`);
         return org;
       }
     }
@@ -191,16 +190,6 @@ function filterResultsByOrganization<T extends { fileName: string }>(
   }
 
   const filtered = results.filter(doc => fileMatchesOrganization(doc.fileName, org));
-
-  console.log(`Organization filter: ${org.canonicalName}`);
-  console.log(`Results before filter: ${results.length}, after: ${filtered.length}`);
-
-  // Если после фильтрации нет результатов, логируем имена файлов для отладки
-  if (filtered.length === 0 && results.length > 0) {
-    console.log('No matching documents found. Available files:',
-      results.map(r => r.fileName).join(', '));
-  }
-
   return filtered;
 }
 
@@ -227,12 +216,10 @@ function hasUploadedDocuments(messages: any[]): boolean {
       : JSON.stringify(message.content);
 
     if (content.includes('[ЗАГРУЖЕННЫЕ ДОКУМЕНТЫ ДЛЯ АНАЛИЗА]')) {
-      console.log('hasUploadedDocuments: found document in message history');
       return true;
     }
   }
 
-  console.log('hasUploadedDocuments: no uploaded documents in history');
   return false;
 }
 
@@ -249,7 +236,6 @@ async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<Que
   if (messages.length > 1) {
     // Берём последние сообщения для контекста (до 7 пар user/assistant)
     const recentMessages = messages.slice(-14);
-    console.log(`analyzeQueryWithLLM: using ${Math.min(messages.length, 14)} messages for context`);
     conversationContext = recentMessages
       .filter((m: any) => m.role === 'user' || m.role === 'assistant')
       .slice(0, -1) // Исключаем последнее (текущее) сообщение
@@ -258,19 +244,10 @@ async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<Que
   }
 
   // Используем LLM для интеллектуальной классификации запроса
-  console.log('Classifying query with LLM...', { hasContext: !!conversationContext });
   const classification = await classifyQueryWithLLM(lastMessage, apiKey, conversationContext || undefined);
-
-  console.log('LLM Classification result:', {
-    collection: classification.collectionKey,
-    confidence: classification.confidence,
-    reasoning: classification.reasoning,
-    needsClarification: classification.needsClarification
-  });
 
   // Если LLM не уверен или требуется уточнение
   if (classification.needsClarification || !classification.collectionKey) {
-    console.log('Clarification needed based on LLM analysis');
     return {
       collectionKey: null,
       isListAll,
@@ -287,7 +264,6 @@ async function analyzeQueryWithLLM(messages: any[], apiKey: string): Promise<Que
 
   // Если коллекция найдена LLM, но не настроена в env
   if (!collectionId) {
-    console.log(`Collection ${classification.collectionKey} not configured in environment`);
     return {
       collectionKey: classification.collectionKey,
       isListAll,
@@ -419,7 +395,6 @@ async function getAllChunksForDocument(
       }
     }
 
-    console.log(`Found ${chunks.length} chunks for file ${fileId}`);
   } catch (error) {
     console.error(`Error fetching chunks for ${fileId}:`, error);
   }
@@ -437,14 +412,6 @@ async function searchCollection(
   maxResults: number = 15,
   organizationFilter: OrganizationInfo | null = null
 ): Promise<string> {
-  console.log('=== Collection Search ===');
-  console.log('Query:', query);
-  console.log('Collection ID:', collectionId);
-  console.log('Max results:', maxResults);
-  if (organizationFilter) {
-    console.log('Organization filter:', organizationFilter.canonicalName);
-  }
-
   try {
     // ШАГ 1: Первоначальный поиск по запросу
     const requestBody = {
@@ -459,8 +426,6 @@ async function searchCollection(
       top_k: maxResults
     };
 
-    console.log('Search request:', JSON.stringify(requestBody));
-
     const response = await fetch('https://api.x.ai/v1/documents/search', {
       method: 'POST',
       headers: {
@@ -470,8 +435,6 @@ async function searchCollection(
       body: JSON.stringify(requestBody),
     });
 
-    console.log('Search response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Collection search failed:', response.status, errorText);
@@ -479,13 +442,9 @@ async function searchCollection(
     }
 
     const data = await response.json();
-    console.log('Search response keys:', Object.keys(data));
-
     const results = data.matches || data.results || [];
-    console.log('Search returned', results.length, 'results');
 
     if (results.length === 0) {
-      console.log('No results found in search response');
       return '';
     }
 
@@ -509,7 +468,6 @@ async function searchCollection(
       }
     }
 
-    console.log(`Found ${uniqueFiles.size} unique documents`);
 
     // ШАГ 3: Используем чанки из результатов поиска (без дополнительных запросов для скорости)
     let enrichedDocuments = Array.from(uniqueFiles.entries()).map(([fileId, meta]) => {
@@ -527,7 +485,6 @@ async function searchCollection(
     if (organizationFilter) {
       const beforeFilter = enrichedDocuments.length;
       enrichedDocuments = filterResultsByOrganization(enrichedDocuments, organizationFilter);
-      console.log(`Organization filter applied: ${beforeFilter} -> ${enrichedDocuments.length} documents`);
 
       // Если после фильтрации не осталось документов - возвращаем сообщение об отсутствии устава
       if (enrichedDocuments.length === 0) {
@@ -564,13 +521,11 @@ async function searchCollection(
       // FALLBACK: Если дата выдачи не найдена, пробуем загрузить полный текст файла через Files API
       // Это помогает, когда заголовок документа (с датой) не попал в поисковые чанки
       if (issueDate === 'Не указано' && doc.fileId) {
-        console.log(`Дата не найдена в чанках для ${doc.fileName}, пробуем Files API...`);
         const fullFileContent = await getFullDocumentContent(apiKey, doc.fileId);
         if (fullFileContent && fullFileContent.length > 0) {
           const fullMeta = extractPoaFieldsFromContent(fullFileContent);
           if (fullMeta.issueDate !== 'Не указано') {
             issueDate = fullMeta.issueDate;
-            console.log(`Дата найдена через Files API: ${issueDate}`);
           }
           // Также обновляем другие поля если они не были найдены
           if (fio === 'Не указано' && fullMeta.fio !== 'Не указано') fio = fullMeta.fio;
@@ -592,7 +547,6 @@ async function searchCollection(
     }));
     const formattedResults = formattedResultsArray.join('\n\n---\n\n');
 
-    console.log('Formatted results length:', formattedResults.length);
     return formattedResults;
   } catch (error) {
     console.error('Search error:', error);
@@ -603,7 +557,6 @@ async function searchCollection(
 // Функция получения полного текста документа через Files API
 async function getFullDocumentContent(apiKey: string, fileId: string): Promise<string> {
   if (!fileId) {
-    console.log('getFullDocumentContent: No fileId provided');
     return '';
   }
 
@@ -622,7 +575,6 @@ async function getFullDocumentContent(apiKey: string, fileId: string): Promise<s
     }
 
     const content = await response.text();
-    console.log(`Downloaded full content for ${fileId}: ${content.length} chars`);
     return content;
   } catch (error) {
     console.error(`Files content API exception for ${fileId}:`, error);
@@ -645,10 +597,6 @@ async function searchWithFullContent(
   apiKey: string,
   collectionId: string
 ): Promise<string> {
-  console.log('=== Search With Full Content ===');
-  console.log('Query:', query);
-  console.log('Collection ID:', collectionId);
-
   try {
     // ШАГ 1: Обычный поиск для определения релевантных документов
     const requestBody = {
@@ -680,7 +628,6 @@ async function searchWithFullContent(
 
     const data = await response.json();
     const results = data.matches || data.results || [];
-    console.log('Initial search returned', results.length, 'results');
 
     if (results.length === 0) {
       return '';
@@ -699,7 +646,6 @@ async function searchWithFullContent(
       }
     }
 
-    console.log('Unique files to download:', uniqueFiles.size);
 
     // ШАГ 3: Скачиваем полный текст каждого уникального документа
     // Если полный текст не удалось загрузить - используем чанки как fallback
@@ -710,11 +656,9 @@ async function searchWithFullContent(
 
         // Если полный контент не получен - fallback на чанки
         if (!content || content.length === 0) {
-          console.log(`Full content not available for ${fileId}, falling back to chunks...`);
           const chunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
           if (chunks.length > 0) {
             content = chunks.join('\n\n');
-            console.log(`Fallback: got ${chunks.length} chunks for ${fileId}, total ${content.length} chars`);
           }
         }
 
@@ -729,7 +673,6 @@ async function searchWithFullContent(
 
     // Фильтруем документы без контента (после попытки загрузки и fallback)
     const validResults = fullContentResults.filter(r => r.content.length > 0);
-    console.log('Documents with content:', validResults.length);
 
     // ШАГ 4: Форматируем результаты с полным текстом и готовой ссылкой
     const formattedResults = validResults.map((r, i) => {
@@ -741,7 +684,6 @@ async function searchWithFullContent(
       return `[${i + 1}] ${r.fileName} (релевантность: ${r.score.toFixed(3)})\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${r.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
     }).join('\n\n---\n\n');
 
-    console.log('Formatted results length:', formattedResults.length);
     return formattedResults;
 
   } catch (error) {
@@ -769,11 +711,6 @@ async function searchWithFullContentAndCache(
   sessionId: string,
   sessionStore: import('@/lib/session').ISessionStore
 ): Promise<SearchWithCacheResult> {
-  console.log('=== Search With Full Content And Cache ===');
-  console.log('Query:', query);
-  console.log('Collection:', collectionKey);
-  console.log('Session:', sessionId);
-
   try {
     // ШАГ 1: Обычный поиск для определения релевантных документов
     const requestBody = {
@@ -805,7 +742,6 @@ async function searchWithFullContentAndCache(
 
     const data = await response.json();
     const results = data.matches || data.results || [];
-    console.log('Initial search returned', results.length, 'results');
 
     if (results.length === 0) {
       return { formattedResults: '', documents: [], cached: false };
@@ -824,7 +760,6 @@ async function searchWithFullContentAndCache(
       }
     }
 
-    console.log('Unique files to download:', uniqueFiles.size);
 
     // ШАГ 3: Скачиваем полный текст и создаём DocumentContext для кэширования
     const documentContexts: DocumentContext[] = [];
@@ -837,12 +772,10 @@ async function searchWithFullContentAndCache(
 
         // Если полный контент не получен - fallback на чанки
         if (!content || content.length === 0) {
-          console.log(`Full content not available for ${fileId}, falling back to chunks...`);
           const chunks = await getAllChunksForDocument(apiKey, collectionId, fileId, meta.fileName);
           if (chunks.length > 0) {
             content = chunks.join('\n\n');
             source = 'chunks';
-            console.log(`Fallback: got ${chunks.length} chunks for ${fileId}, total ${content.length} chars`);
           }
         }
 
@@ -860,7 +793,6 @@ async function searchWithFullContentAndCache(
       })
     );
 
-    console.log('Documents with content:', documentContexts.length);
 
     // ШАГ 4: Сохраняем в кэш сессии
     if (documentContexts.length > 0) {
@@ -871,7 +803,6 @@ async function searchWithFullContentAndCache(
         documentContexts,
         query
       );
-      console.log('Cache add result:', addResult);
     }
 
     // ШАГ 5: Форматируем результаты
@@ -883,7 +814,6 @@ async function searchWithFullContentAndCache(
       return `[${i + 1}] ${doc.fileName} (релевантность: ${doc.score.toFixed(3)})\nИсточник: ${doc.source === 'full' ? 'полный текст' : 'чанки'}\nСсылка на скачивание: ${markdownLink}\n\n=== ПОЛНЫЙ ТЕКСТ ДОКУМЕНТА ===\n${doc.content}\n=== КОНЕЦ ДОКУМЕНТА ===`;
     }).join('\n\n---\n\n');
 
-    console.log('Formatted results length:', formattedResults.length);
 
     return {
       formattedResults,
@@ -911,13 +841,6 @@ async function chatWithFileAttachment(
   messages: any[],
   organizationFilter: OrganizationInfo | null = null
 ): Promise<Response | null> {
-  console.log('=== Chat With File Attachment ===');
-  console.log('Query:', query);
-  console.log('Collection ID:', collectionId);
-  if (organizationFilter) {
-    console.log('Organization filter:', organizationFilter.canonicalName);
-  }
-
   try {
     // ШАГ 1: Поиск для определения релевантного документа
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
@@ -944,7 +867,6 @@ async function chatWithFileAttachment(
     let results = searchData.matches || searchData.results || [];
 
     if (results.length === 0) {
-      console.log('No documents found');
       return null;
     }
 
@@ -956,10 +878,8 @@ async function chatWithFileAttachment(
         const fileName = r.fields?.file_name || r.fields?.name || '';
         return fileMatchesOrganization(fileName, organizationFilter);
       });
-      console.log(`Organization filter applied (file attachment): ${beforeFilter} -> ${results.length} documents`);
 
       if (results.length === 0) {
-        console.log(`No documents found for organization: ${organizationFilter.canonicalName}`);
         return null; // Fallback to regular search which will show the proper message
       }
     }
@@ -970,11 +890,9 @@ async function chatWithFileAttachment(
     const fileName = firstResult.fields?.file_name || firstResult.fields?.name || 'Документ';
 
     if (!fileId) {
-      console.log('No file_id in search result');
       return null;
     }
 
-    console.log(`Found document: ${fileName} (${fileId})`);
 
     // Создаём ссылку на скачивание
     const encodedFilename = encodeURIComponent(fileName);
@@ -1009,9 +927,6 @@ async function chatWithFileAttachment(
       ]
     };
 
-    console.log('Sending Responses API request with file attachment...');
-    console.log('Request body:', JSON.stringify(responsesRequestBody, null, 2).substring(0, 1000));
-
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
@@ -1021,9 +936,6 @@ async function chatWithFileAttachment(
       body: JSON.stringify(responsesRequestBody),
     });
 
-    console.log('Responses API response status:', response.status);
-    console.log('Responses API response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Responses API error:', response.status, errorText);
@@ -1031,7 +943,6 @@ async function chatWithFileAttachment(
       return null;
     }
 
-    console.log('Responses API success, returning stream response...');
     return response;
 
   } catch (error) {
@@ -1252,7 +1163,6 @@ function extractPoaFieldsFromFilename(filename: string): {
 // Функция получения информации о файле через Files API
 async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: string; createdAt: string; allFields: any } | null> {
   if (!fileId) {
-    console.log('getFileInfo: No fileId provided');
     return null;
   }
 
@@ -1273,7 +1183,6 @@ async function getFileInfo(apiKey: string, fileId: string): Promise<{ filename: 
     const data = await response.json();
 
     // Логируем первые несколько ответов для диагностики
-    console.log(`Files API response for ${fileId}:`, JSON.stringify(data, null, 2).substring(0, 500));
 
     // Пробуем все возможные поля с названием файла
     // Проверяем как прямые поля, так и вложенные в metadata/fields
@@ -1696,15 +1605,6 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
     const data = await response.json();
     // API может возвращать результаты в "matches" или "results"
     const results = data.matches || data.results || [];
-    console.log(`Content search returned ${results.length} results`);
-
-    // Логируем первый результат для отладки
-    if (results[0]) {
-      console.log('=== CONTENT SEARCH RESULT DEBUG ===');
-      console.log('First search result keys:', Object.keys(results[0]));
-      console.log('First search result:', JSON.stringify(results[0], null, 2).substring(0, 1000));
-      console.log('=== END CONTENT SEARCH DEBUG ===');
-    }
 
     // Обрабатываем каждый результат
     for (const result of results) {
@@ -1740,7 +1640,6 @@ async function searchAllDocumentsContent(apiKey: string, collectionId: string): 
       }
     }
 
-    console.log(`Extracted data for ${resultsMap.size} unique documents from content search`);
     return resultsMap;
   } catch (error) {
     console.error('Search all documents content error:', error);
@@ -1758,9 +1657,6 @@ const COLLECTION_SEARCH_QUERIES: Record<string, string> = {
 };
 
 async function getDocumentsListFast(apiKey: string, collectionId: string, collectionKey?: string): Promise<string> {
-  console.log('=== Get Documents List (Fast mode) ===');
-  console.log('Collection ID:', collectionId, 'Collection Key:', collectionKey);
-
   try {
     // ШАГ 1: Получаем ВСЕ документы через list API (с пагинацией)
     let documents: any[] = [];
@@ -1798,18 +1694,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 
       if (batch.length === 0) break;
 
-      // Логируем структуру первого документа для отладки
-      if (documents.length === 0 && batch.length > 0) {
-        console.log('=== LIST API FIRST DOC ===');
-        console.log('Doc keys:', Object.keys(batch[0]));
-        console.log('Doc sample:', JSON.stringify(batch[0], null, 2).substring(0, 1000));
-        console.log('file_id:', batch[0].file_id);
-        console.log('id:', batch[0].id);
-        console.log('name:', batch[0].name);
-        console.log('file_name:', batch[0].file_name);
-        console.log('=== END LIST API ===');
-      }
-
       documents = documents.concat(batch);
 
       // Продолжаем пагинацию если есть ещё документы
@@ -1827,7 +1711,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
       return '';
     }
 
-    console.log(`Found ${documents.length} documents from list API (with pagination)`);
 
     // ШАГ 2: Получаем названия файлов через ОДИН поисковый запрос
     // Search API возвращает file_name в результатах
@@ -1835,7 +1718,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 
     // Выбираем подходящий поисковый запрос для коллекции
     const searchQuery = COLLECTION_SEARCH_QUERIES[collectionKey || ''] || COLLECTION_SEARCH_QUERIES.standardsAndRegulations;
-    console.log('Using search query:', searchQuery);
 
     const searchResponse = await fetch('https://api.x.ai/v1/documents/search', {
       method: 'POST',
@@ -1855,12 +1737,9 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
     if (searchResponse.ok) {
       const searchData = await searchResponse.json();
       const results = searchData.matches || searchData.results || [];
-      console.log(`Search returned ${results.length} results`);
 
       // Логируем первый результат для отладки
       if (results.length > 0) {
-        console.log('First search result keys:', Object.keys(results[0]));
-        console.log('First result sample:', JSON.stringify(results[0], null, 2).substring(0, 500));
       }
 
       for (const result of results) {
@@ -1870,7 +1749,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
           fileNamesByFileId.set(fileId, fileName);
         }
       }
-      console.log(`Found filenames for ${fileNamesByFileId.size} documents`);
     }
 
     // ШАГ 2.5: Для документов без имён - получаем через Files API (батчами по 5)
@@ -1886,7 +1764,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
     }
 
     if (docsNeedingNames.length > 0) {
-      console.log(`Fetching names for ${docsNeedingNames.length} docs via Files API`);
       const BATCH_SIZE = 5;
       for (let i = 0; i < docsNeedingNames.length; i += BATCH_SIZE) {
         const batch = docsNeedingNames.slice(i, i + BATCH_SIZE);
@@ -1900,7 +1777,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
           }
         }
       }
-      console.log(`After Files API: ${fileNamesByFileId.size} docs have names`);
     }
 
     // ШАГ 3: Обогащаем документы названиями
@@ -1911,11 +1787,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
       let fileName = doc.file_metadata?.name || doc.file_name || doc.name || doc.title || '';
       if (!fileName && fileId) {
         fileName = fileNamesByFileId.get(fileId) || '';
-      }
-
-      // Логируем для отладки
-      if (index < 3) {
-        console.log(`Doc ${index}: fileId=${fileId}, fileName from list=${doc.file_metadata?.name || doc.file_name || doc.name || 'none'}, fileName from search=${fileNamesByFileId.get(fileId) || 'none'}`);
       }
 
       // Убираем расширение файла для красивого отображения названия
@@ -1949,9 +1820,6 @@ async function getDocumentsListFast(apiKey: string, collectionId: string, collec
 // Быстрая версия для доверенностей - извлекает метаданные только из названий файлов
 // без выполнения множества поисковых запросов (которые вызывают timeout)
 async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Promise<string> {
-  console.log('=== Get Documents List Fast (POA mode) ===');
-  console.log('Collection ID:', collectionId);
-
   try {
     // Получаем список документов (с пагинацией)
     let allDocuments: any[] = [];
@@ -2005,7 +1873,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       return '';
     }
 
-    console.log(`Found ${allDocuments.length} documents from list API`);
 
     // ШАГ 2: Получаем названия файлов И чанки через НЕСКОЛЬКО поисковых запросов
     // для обеспечения максимального покрытия всех документов
@@ -2044,7 +1911,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
           if (searchResponse.ok) {
             const searchData = await searchResponse.json();
             const results = searchData.matches || searchData.results || [];
-            console.log(`Search query "${query.substring(0, 30)}..." returned ${results.length} results`);
             return { query, results };
           }
           return { query, results: [] as any[] };
@@ -2082,8 +1948,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       }
     }
 
-    console.log(`After multiple searches: Found filenames for ${fileNamesByFileId.size} POA documents`);
-    console.log(`After multiple searches: Found content chunks for ${contentChunksByFileId.size} POA documents`);
 
     // ШАГ 2.3: Для документов без контента - делаем индивидуальный поиск по file_id
     const allFileIds = new Set(allDocuments.map((doc: any) =>
@@ -2091,11 +1955,9 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
     ).filter(Boolean));
 
     const docsWithoutContent = [...allFileIds].filter(id => !contentChunksByFileId.has(id));
-    console.log(`Documents without content: ${docsWithoutContent.length} of ${allFileIds.size}`);
 
     if (docsWithoutContent.length > 0 && docsWithoutContent.length <= 20) {
       // Для небольшого количества документов без контента - делаем индивидуальные запросы
-      console.log(`Fetching content for ${docsWithoutContent.length} documents individually...`);
       const BATCH_SIZE = 5;
       for (let i = 0; i < docsWithoutContent.length; i += BATCH_SIZE) {
         const batch = docsWithoutContent.slice(i, i + BATCH_SIZE);
@@ -2142,7 +2004,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
           }
         }));
       }
-      console.log(`After individual searches: ${contentChunksByFileId.size} documents have content`);
     }
 
     // ШАГ 2.5: Для документов без имён - получаем через Files API (батчами по 5)
@@ -2159,7 +2020,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
     }
 
     if (docsNeedingNames.length > 0) {
-      console.log(`Fetching names for ${docsNeedingNames.length} POA docs via Files API`);
       const BATCH_SIZE = 5;
       for (let i = 0; i < docsNeedingNames.length; i += BATCH_SIZE) {
         const batch = docsNeedingNames.slice(i, i + BATCH_SIZE);
@@ -2173,7 +2033,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
           }
         }
       }
-      console.log(`After Files API: ${fileNamesByFileId.size} POA docs have names`);
     }
 
     // ШАГ 3: Обогащаем документы названиями и метаданными из содержимого
@@ -2183,10 +2042,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
       let fileName = doc.file_metadata?.name || doc.file_name || doc.name || doc.title || '';
       if (!fileName && fileId) {
         fileName = fileNamesByFileId.get(fileId) || '';
-      }
-
-      if (index < 3) {
-        console.log(`POA Doc ${index}: fileId=${fileId}, fileName=${fileName || 'none'}`);
       }
 
       // Извлекаем метаданные из названия файла
@@ -2217,7 +2072,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
     );
 
     if (docsNeedingMoreData.length > 0) {
-      console.log(`Found ${docsNeedingMoreData.length} docs with incomplete metadata, fetching targeted chunks...`);
 
       const BATCH_SIZE = 3;
       for (let i = 0; i < docsNeedingMoreData.length; i += BATCH_SIZE) {
@@ -2307,13 +2161,11 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
               doc.validUntil = newMeta.validUntil;
             }
 
-            console.log(`Updated metadata for ${doc.fileName}: FIO=${doc.fio}, number=${doc.poaNumber}, issue=${doc.issueDate}, valid=${doc.validUntil}`);
           }
         }));
       }
     }
 
-    console.log(`Enriched ${enrichedDocs.length} POA documents`);
 
     // Форматируем в формате, который ожидает система для POA
     const formattedResults = enrichedDocs.map((doc, i) => {
@@ -2338,9 +2190,6 @@ async function getDocumentsListFastPOA(apiKey: string, collectionId: string): Pr
 // Функция получения ПОЛНОГО списка всех документов из коллекции
 // Сначала получаем ВСЕ документы через list API, потом ищем контент для метаданных
 async function getAllDocuments(apiKey: string, collectionId: string): Promise<string> {
-  console.log('=== Get All Documents ===');
-  console.log('Collection ID:', collectionId);
-
   try {
     // ШАГ 1: Получаем ВСЕ документы через list API (гарантирует полный список)
     let allDocuments: any[] = [];
@@ -2372,16 +2221,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
       if (documents.length === 0) break;
 
-      // Логируем структуру первого документа для отладки
-      if (allDocuments.length === 0 && documents.length > 0) {
-        console.log('=== LIST API RESPONSE ===');
-        console.log('Response keys:', Object.keys(data));
-        console.log('Documents count:', documents.length);
-        console.log('First document keys:', Object.keys(documents[0]));
-        console.log('First document:', JSON.stringify(documents[0], null, 2).substring(0, 1500));
-        console.log('=== END LIST API RESPONSE ===');
-      }
-
       allDocuments = allDocuments.concat(documents);
 
       const hasMore = data.has_more || (documents.length === limit);
@@ -2393,7 +2232,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       }
     } while (cursor);
 
-    console.log(`List API returned ${allDocuments.length} documents`);
 
     // ШАГ 2: Собираем контент через поиск для извлечения метаданных
     // Расширенный список запросов для поиска дат и метаданных
@@ -2502,15 +2340,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           const data = await response.json();
           const results = data.matches || data.results || [];
 
-          // Логируем первый результат первого поиска для отладки
-          if (query === 'доверенность' && results.length > 0) {
-            console.log('=== SEARCH API FIRST RESULT ===');
-            console.log('Result keys:', Object.keys(results[0]));
-            console.log('Result fields:', results[0].fields ? Object.keys(results[0].fields) : 'no fields');
-            console.log('Result sample:', JSON.stringify(results[0], null, 2).substring(0, 1500));
-            console.log('=== END SEARCH RESULT ===');
-          }
-
           return { query, results };
         } catch (err) {
           console.error(`Search query "${query}" failed:`, err);
@@ -2548,13 +2377,10 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       }
     }
 
-    console.log(`Search collected content for ${contentByFileId.size} documents`);
-    console.log(`Search collected file names for ${fileNamesByFileId.size} documents`);
 
     // Логируем примеры найденных имён файлов
     if (fileNamesByFileId.size > 0) {
       const sampleNames = Array.from(fileNamesByFileId.entries()).slice(0, 3);
-      console.log('Sample file names from search:', sampleNames);
     }
 
     // Если list API вернул документы без имён, но search нашёл file_id - используем search как источник
@@ -2570,14 +2396,11 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
         const fileName = fileNamesByFileId.get(fileId);
         if (fileName) {
           allDocuments.push({ file_id: fileId, name: fileName });
-          console.log(`Added document from search: ${fileId} (${fileName})`);
           addedFromSearch++;
         } else {
-          console.log(`Skipped document from search (no filename): ${fileId}`);
         }
       }
     }
-    console.log(`Total documents after merge: ${allDocuments.length} (list: ${listFileIds.size}, added from search: ${addedFromSearch})`);
 
     // ШАГ 3: Обогащаем ВСЕ документы данными из поиска и Files API
     const enrichedDocuments = await Promise.all(
@@ -2599,15 +2422,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           if (fileInfo?.filename) {
             fileName = fileInfo.filename;
           }
-          // Логируем для отладки первых 3 документов
-          if (index < 3) {
-            console.log(`Files API for doc ${index}:`, fileInfo ? JSON.stringify(fileInfo.allFields).substring(0, 300) : 'null');
-          }
-        }
-
-        // Логируем для отладки
-        if (index < 3) {
-          console.log(`Doc ${index}: fileId=${fileId}, fileName=${fileName || 'EMPTY'}, fromSearch=${fileNamesByFileId.has(fileId)}`);
         }
 
         // Извлекаем поля из названия файла
@@ -2650,10 +2464,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
           }
         }
 
-        if (index < 3) {
-          console.log(`Document ${index}:`, { fileId, fileName, chunksCount: chunks.length, fio, poaNumber, issueDate, validUntil });
-        }
-
         return { fileName: fileName || 'Документ', fileId, fio, poaNumber, issueDate, validUntil };
       })
     );
@@ -2670,7 +2480,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       return hasRealFileName || hasAnyData;
     });
 
-    console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
 
     // Форматируем результаты
     // ВАЖНО: Создаём готовую markdown-ссылку с закодированным URL
@@ -2686,10 +2495,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
       return `[${i + 1}] Файл: ${doc.fileName} | ФИО: ${doc.fio} | Номер: ${doc.poaNumber} | Дата выдачи: ${doc.issueDate} | Действует до: ${doc.validUntil} | Скачать: ${markdownLink}`;
     }).join('\n');
 
-    console.log('=== FORMATTED DOCUMENTS PREVIEW ===');
-    console.log(formattedResults.split('\n').slice(0, 3).join('\n'));
-    console.log('=== END PREVIEW ===');
-
     const summary = `\n\nВСЕГО ДОКУМЕНТОВ В БАЗЕ: ${filteredDocuments.length}`;
     return formattedResults + summary;
 
@@ -2701,8 +2506,6 @@ async function getAllDocuments(apiKey: string, collectionId: string): Promise<st
 
 // Fallback функция для получения документов через list endpoint
 async function getAllDocumentsViaList(apiKey: string, collectionId: string): Promise<string> {
-  console.log('=== Fallback: Get All Documents via List ===');
-
   try {
     let allDocuments: any[] = [];
     let cursor: string | null = null;
@@ -2732,13 +2535,6 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
       const documents = data.data || data.documents || [];
 
       if (documents.length === 0) break;
-
-      // Логируем структуру первого документа для отладки
-      if (allDocuments.length === 0 && documents[0]) {
-        console.log('=== LIST DOCUMENT STRUCTURE ===');
-        console.log('Document:', JSON.stringify(documents[0], null, 2));
-        console.log('=== END ===');
-      }
 
       allDocuments = allDocuments.concat(documents);
 
@@ -2799,7 +2595,6 @@ async function getAllDocumentsViaList(apiKey: string, collectionId: string): Pro
       return hasRealFileName || hasAnyData;
     });
 
-    console.log(`Filtered documents: ${filteredDocuments.length} (removed ${enrichedDocuments.length - filteredDocuments.length} empty)`);
 
     // Форматируем результаты
     // ВАЖНО: Создаём готовую markdown-ссылку с закодированным URL
@@ -2853,7 +2648,6 @@ function expandSearchQueryForCourtPowers(query: string): string {
 
   if (expansions.length > 0) {
     const expandedQuery = `${query} ${expansions.join(' ')}`;
-    console.log('Expanded search query for court powers:', expandedQuery.substring(0, 200));
     return expandedQuery;
   }
 
@@ -2884,7 +2678,6 @@ function buildContextualSearchQuery(messages: any[], maxMessages: number = 7): s
   // Формируем запрос: контекст + текущий вопрос (с большим весом на текущий)
   const combinedQuery = `${currentQuestion} (контекст: ${contextMessages})`;
 
-  console.log('Contextual search query built from', userMessages.length, 'messages');
 
   return combinedQuery;
 }
@@ -2902,8 +2695,6 @@ function createResponsesStreamResponse(response: Response): Response {
   let totalBytesReceived = 0;
   let currentEventType = '';
 
-  console.log('=== Starting Responses API stream processing ===');
-
   const transformStream = new TransformStream({
     transform(chunk, controller) {
       const text = decoder.decode(chunk, { stream: true });
@@ -2912,20 +2703,12 @@ function createResponsesStreamResponse(response: Response): Response {
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
-      console.log(`Received chunk: ${chunk.byteLength} bytes, total: ${totalBytesReceived}, lines: ${lines.length}`);
-
       for (const line of lines) {
         const trimmedLine = line.trim();
-
-        // Логируем каждую непустую строку
-        if (trimmedLine) {
-          console.log('SSE line:', trimmedLine.substring(0, 300));
-        }
 
         // Отслеживаем тип события
         if (trimmedLine.startsWith('event: ')) {
           currentEventType = trimmedLine.slice(7).trim();
-          console.log('Event type:', currentEventType);
           continue;
         }
 
@@ -2933,15 +2716,12 @@ function createResponsesStreamResponse(response: Response): Response {
           const data = trimmedLine.slice(6).trim();
 
           if (data === '[DONE]') {
-            console.log('Stream [DONE], total chunks extracted:', chunkCount);
             controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
             return;
           }
 
           try {
             const json = JSON.parse(data);
-            const eventType = json.type || currentEventType || 'unknown';
-            console.log(`JSON event: ${eventType}, keys: ${Object.keys(json).join(',')}`);
 
             // Извлекаем текст из разных форматов ответа
             let content = null;
@@ -2949,65 +2729,47 @@ function createResponsesStreamResponse(response: Response): Response {
             // Формат 1: xAI/OpenAI Responses API - response.output_text.delta
             if (json.type === 'response.output_text.delta' && json.delta) {
               content = json.delta;
-              console.log('Format: response.output_text.delta');
             }
             // Формат 2: Anthropic-style - content_block_delta
             else if (json.type === 'content_block_delta' && json.delta?.text) {
               content = json.delta.text;
-              console.log('Format: content_block_delta');
             }
             // Формат 3: Chat Completions streaming - choices[].delta.content
             else if (json.choices?.[0]?.delta?.content !== undefined) {
               content = json.choices[0].delta.content;
-              console.log('Format: chat.completion.chunk');
             }
             // Формат 4: Прямой delta.content
             else if (json.delta?.content) {
               content = json.delta.content;
-              console.log('Format: delta.content');
             }
             // Формат 5: output_text.text напрямую
             else if (json.output_text?.text) {
               content = json.output_text.text;
-              console.log('Format: output_text.text');
             }
             // Формат 6: text напрямую в delta
             else if (json.delta?.text) {
               content = json.delta.text;
-              console.log('Format: delta.text');
             }
             // Формат 7: content напрямую
             else if (typeof json.content === 'string') {
               content = json.content;
-              console.log('Format: direct content');
             }
             // Формат 8: text напрямую
             else if (typeof json.text === 'string') {
               content = json.text;
-              console.log('Format: direct text');
             }
 
             if (content !== null && content !== undefined && content !== '') {
               chunkCount++;
               controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
-              if (chunkCount <= 3 || chunkCount % 50 === 0) {
-                console.log(`Chunk ${chunkCount}: "${String(content).substring(0, 50)}..."`);
-              }
-            } else if (!['response.created', 'response.in_progress', 'response.output_item.added',
-                        'response.content_part.added', 'response.output_text.done',
-                        'response.content_part.done', 'response.output_item.done',
-                        'response.completed', 'response.done'].includes(json.type)) {
-              // Логируем неизвестные события с контентом
-              console.log('Unknown event with data:', JSON.stringify(json).substring(0, 200));
             }
-          } catch (e) {
-            console.log('JSON parse error for data:', data.substring(0, 100), e);
+          } catch {
+            // ignore parse errors
           }
         }
       }
     },
     flush(controller) {
-      console.log(`Stream flush. Buffer remaining: "${buffer.substring(0, 100)}", total bytes: ${totalBytesReceived}`);
       if (buffer.trim()) {
         const trimmedLine = buffer.trim();
         if (trimmedLine.startsWith('data: ')) {
@@ -3031,13 +2793,12 @@ function createResponsesStreamResponse(response: Response): Response {
                 chunkCount++;
                 controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`));
               }
-            } catch (e) {
+            } catch {
               // ignore
             }
           }
         }
       }
-      console.log(`=== Stream complete. Total chunks: ${chunkCount}, bytes: ${totalBytesReceived} ===`);
       controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
     }
   });
@@ -3070,7 +2831,6 @@ function createStreamResponse(response: Response, sessionId?: string): Response 
           const data = trimmedLine.slice(6).trim();
 
           if (data === '[DONE]') {
-            console.log('Stream done, total chunks:', chunkCount);
             controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
             return;
           }
@@ -3107,7 +2867,6 @@ function createStreamResponse(response: Response, sessionId?: string): Response 
           }
         }
       }
-      console.log('Stream flush, sending finish');
       controller.enqueue(encoder.encode('d:{"finishReason":"stop"}\n'));
     }
   });
@@ -3131,15 +2890,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { messages, sessionId: clientSessionId } = body;
-    console.log('Messages received:', messages.length);
 
     // Получаем или создаём sessionId
     let sessionId = clientSessionId;
     if (!sessionId || !isValidSessionId(sessionId)) {
       sessionId = generateSessionId();
-      console.log('Generated new sessionId:', sessionId);
     } else {
-      console.log('Using client sessionId:', sessionId);
     }
 
     // Получаем session store
@@ -3159,7 +2915,6 @@ export async function POST(req: Request) {
     const isUploadedDocumentRequest = hasUploadedDocuments(messages);
 
     if (isUploadedDocumentRequest) {
-      console.log('Using uploaded document mode with knowledge base search');
 
       // Извлекаем текст загруженного документа для поиска
       // Ищем сообщение с маркером документа (может быть не последним при follow-up вопросах)
@@ -3177,7 +2932,6 @@ export async function POST(req: Request) {
       const isPoaDocument = /доверенност|уполномоч|полномочи/i.test(uploadedContent);
 
       if (isPoaDocument) {
-        console.log('Uploaded document looks like a POA - searching knowledge base');
 
         // Извлекаем номер доверенности и ФИО для поиска
         const poaNumberMatch = uploadedContent.match(/(?:доверенност[ьи]?\s*)?№?\s*([А-ЯA-Z]{1,4}[-\s]?\d{1,4}[-/]?\d{0,4})/i);
@@ -3192,13 +2946,11 @@ export async function POST(req: Request) {
 
         if (poaCollectionId && searchTerms.length > 0) {
           const searchQuery = searchTerms.join(' ');
-          console.log('Searching POA collection for:', searchQuery);
 
           try {
             const searchResults = await searchCollection(searchQuery, apiKey, poaCollectionId, 5);
             if (searchResults) {
               knowledgeBaseContext = `\n\n=== РЕЗУЛЬТАТЫ ПОИСКА В БАЗЕ ДОВЕРЕННОСТЕЙ ===\n${searchResults}\n=== КОНЕЦ РЕЗУЛЬТАТОВ ПОИСКА ===`;
-              console.log('Found matching documents in knowledge base');
             }
           } catch (e) {
             console.error('Error searching knowledge base:', e);
@@ -3216,7 +2968,6 @@ export async function POST(req: Request) {
         content: m.content,
       }));
 
-      console.log('Calling xAI Chat API for uploaded documents...');
 
       const response = await fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
@@ -3267,7 +3018,6 @@ export async function POST(req: Request) {
 
     // Проверяем, требуется ли уточнение от пользователя
     if (queryAnalysis.needsClarification) {
-      console.log('Clarification needed - LLM analysis:', queryAnalysis.classificationReasoning);
 
       // Используем уточняющий вопрос от LLM или стандартный
       let clarificationMessage: string;
@@ -3311,21 +3061,12 @@ export async function POST(req: Request) {
 
     const collectionConfig = getCollectionConfig(collectionKey);
 
-    console.log('Query analysis:', {
-      collectionKey,
-      collectionName: collectionConfig?.displayName,
-      isListAll,
-      collectionId,
-      useFullContent: collectionConfig?.useFullContent ?? false
-    });
-
     // Получаем документы - либо полный список, либо через поиск
     let documentResults: string;
     let contextSection: string;
 
 if (isListAll) {
       // Для запросов о полном списке - получаем документы из коллекции
-      console.log('Fetching documents from collection...');
 
       const collectionName = collectionConfig?.displayName || 'документов';
       const useFullContent = collectionConfig?.useFullContent ?? false;
@@ -3335,15 +3076,12 @@ if (isListAll) {
       if (collectionKey === 'poa') {
         // Для доверенностей - быстрая загрузка с метаданными из названий файлов
         documentResults = await getDocumentsListFastPOA(apiKey, collectionId);
-        console.log('Fast POA documents results length:', documentResults.length);
 
         const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
         const { fields, instruction } = detectRequestedTableFields(lastUserMessage);
-        console.log('Requested table fields:', fields);
 
         // Подсчитываем количество документов для явной инструкции
         const docCount = (documentResults.match(/^\[\d+\]/gm) || []).length;
-        console.log(`POA document count from formatted results: ${docCount}`);
 
         contextSection = documentResults
           ? `\n\nПОЛНЫЙ СПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\n` +
@@ -3358,7 +3096,6 @@ if (isListAll) {
       } else {
         // Для других коллекций (уставы, формы договоров) - быстрая загрузка только списка
         documentResults = await getDocumentsListFast(apiKey, collectionId, collectionKey);
-        console.log('Fast documents list length:', documentResults.length);
 
         contextSection = documentResults
           ? `\n\nСПИСОК ДОКУМЕНТОВ В БАЗЕ (${collectionName}):\n${documentResults}\n\nЭто список всех документов в базе данных "${collectionName}". Для каждого документа указано название и ссылка на скачивание.`
@@ -3380,14 +3117,12 @@ if (isListAll) {
       const useFileAttachment = collectionConfig?.useFileAttachment ?? false;
 
       if (useFileAttachment) {
-        console.log(`Trying Responses API with file attachment for ${collectionKey}...`);
 
         // Для коллекции уставов - извлекаем организацию из контекста диалога
         let orgFilterForAttachment: OrganizationInfo | null = null;
         if (collectionKey === 'articlesOfAssociation') {
           orgFilterForAttachment = extractOrganizationFromMessages(messages);
           if (orgFilterForAttachment) {
-            console.log(`File attachment: filtering by organization ${orgFilterForAttachment.canonicalName}`);
           }
         }
 
@@ -3401,12 +3136,10 @@ if (isListAll) {
         );
 
         if (fileResponse) {
-          console.log('Using Responses API response');
           // Трансформируем поток из Responses API в формат Chat Completions
           return createResponsesStreamResponse(fileResponse);
         }
 
-        console.log('Responses API failed, falling back to chunk search...');
       }
 
       // ШАГ 1: Проверяем кэш сессии
@@ -3414,7 +3147,6 @@ if (isListAll) {
 
       if (cachedContext && cachedContext.documents.length > 0) {
         // Используем кэшированный контекст
-        console.log(`Using cached context for ${collectionKey}: ${cachedContext.documents.length} documents`);
 
         const cachedFormatted = await sessionStore.getFormattedContext(sessionId);
         contextSection = cachedFormatted
@@ -3424,7 +3156,6 @@ if (isListAll) {
         documentResults = cachedFormatted;
       } else {
         // Кэша нет - загружаем документы
-        console.log(`No cache for ${collectionKey}, loading documents...`);
 
         // Проверяем, нужно ли использовать полный текст документов
         const useFullContent = collectionConfig?.useFullContent ?? false;
@@ -3432,7 +3163,6 @@ if (isListAll) {
         if (useFullContent) {
           // Для коллекций с небольшими документами (доверенности и т.п.)
           // скачиваем полный текст вместо чанков
-          console.log('Using full content mode for collection:', collectionKey);
 
           // Загружаем документы с полным текстом
           const searchResults = await searchWithFullContentAndCache(
@@ -3445,7 +3175,6 @@ if (isListAll) {
           );
 
           documentResults = searchResults.formattedResults;
-          console.log('Full content search results length:', documentResults.length);
 
           contextSection = documentResults
             ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ (ПОЛНЫЙ ТЕКСТ):\n${documentResults}\n\nВАЖНО: Выше представлен ПОЛНЫЙ текст каждого найденного документа. Эти документы сохранены в контексте сессии и будут доступны для последующих вопросов.`
@@ -3460,14 +3189,11 @@ if (isListAll) {
           if (collectionKey === 'articlesOfAssociation') {
             organizationFilter = extractOrganizationFromMessages(messages);
             if (organizationFilter) {
-              console.log(`Articles of Association: filtering by organization ${organizationFilter.canonicalName}`);
             } else {
-              console.log('Articles of Association: no specific organization detected, returning all results');
             }
           }
 
           documentResults = await searchCollection(searchQuery, apiKey, collectionId, maxResults, organizationFilter);
-          console.log('Chunk search results length:', documentResults.length);
 
           contextSection = documentResults
             ? `\n\nНАЙДЕННЫЕ ДОКУМЕНТЫ:\n${documentResults}\n\nИспользуйте информацию из найденных документов для ответа.`
@@ -3477,20 +3203,17 @@ if (isListAll) {
     }
 
     // Логируем размер контекста для отладки
-    console.log('Context section size:', contextSection.length, 'characters');
 
     // Grok 4.1 поддерживает 2M токенов - лимит не нужен
     const { text: truncatedContext } = truncateContextIfNeeded(contextSection);
 
     const systemPromptWithContext = systemPrompt + truncatedContext;
-    console.log('Total system prompt size:', systemPromptWithContext.length, 'characters');
 
     const apiMessages = messages.map((m: any) => ({
       role: m.role,
       content: m.content,
     }));
 
-    console.log('Calling xAI Chat API...');
 
     // Используем обычный Chat Completions API
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -3509,7 +3232,6 @@ if (isListAll) {
       }),
     });
 
-    console.log('xAI response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
